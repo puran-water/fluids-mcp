@@ -27,7 +27,7 @@ A Model Context Protocol (MCP) server providing comprehensive fluid mechanics an
 ## Installation
 
 ### Prerequisites
-- Python 3.8+
+- Python 3.10+
 - MCP client (Claude Desktop or compatible)
 
 ### Setup
