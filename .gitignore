@@ -163,3 +163,9 @@ fluids-mcp-enhancement-strategy.md
 fluids-mcp-system-prompt.md
 mcp-client-test-results.md
 FIXES_SUMMARY.md
+
+# Large files (>100MB)
+*.zip
+*.tar.gz
+*.rar
+PuranWebsite.zip
