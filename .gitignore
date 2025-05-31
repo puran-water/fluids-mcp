@@ -169,3 +169,12 @@ FIXES_SUMMARY.md
 *.tar.gz
 *.rar
 PuranWebsite.zip
+
+# Development files not for end users
+.claude/
+archive/
+custom_fluids/
+*push*.bat
+*push*.md
+fix_*.bat
+debug_*.py

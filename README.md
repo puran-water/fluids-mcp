@@ -153,12 +153,12 @@ Calculate pressure drop for biogas piping:
 - **Internal Calculations**: SI units for accuracy
 - **Output**: User-preferred units with clear labeling
 
-### Recent Fixes (v1.1.0)
-- Fixed FluidProperties gamma attribute access
-- Corrected molecular weight unit conversions (kg/mol vs kg/kmol)
-- Fixed Kv to Cv conversion factor (now correctly × 1.156)
-- Improved fluid property lookup to avoid fallbacks
-- Enhanced support for common gases like Methane
+### Latest Version (v1.2.0)
+- Professional-grade testing with comprehensive test suite
+- Robust property lookup for all common fluids including methane, air, water
+- Accurate unit conversions and valve sizing calculations
+- Enhanced package structure for reliable deployment
+- Cross-platform compatibility
 
 ## Development
 
@@ -189,12 +189,12 @@ fluids-mcp/
 
 Run the test suite:
 ```bash
-python test_fluids_mcp.py
+pytest tests/ -v
 ```
 
-For specific component tests:
+For coverage reporting:
 ```bash
-python test_fixes.py
+pytest tests/ --cov=tools --cov=utils --cov=pydraulics --cov-report=term-missing
 ```
 
 ### Contributing
