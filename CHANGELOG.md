@@ -5,7 +5,26 @@ All notable changes to the Fluids MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2024-01-XX
+## [1.2.0] - 2025-01-31
+
+### Added
+- Proper pytest test suite with assertions and coverage reporting
+- Cross-platform configuration examples for Claude Desktop
+- Code quality improvements based on expert review
+- Future improvements documentation for advanced features
+
+### Fixed
+- Removed sys.path manipulation in pydraulics imports (now properly packaged)
+- Removed redundant open_channel_flow.py (replaced by open_channel_flow_new.py)
+- Added sympy dependency for pydraulics symbolic math support
+- Updated CI/CD to use proper pytest instead of print-based tests
+
+### Changed
+- Improved package structure for better deployment reliability
+- Enhanced testing with code coverage reporting
+- Updated documentation with cross-platform examples
+
+## [1.1.0] - 2025-01-31
 
 ### Added
 - Comprehensive test suite for wastewater treatment scenarios
@@ -31,7 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hardcoded MW values: Updated from g/mol to kg/kmol for consistency
 - Property lookup: Changed to try FluidProperties directly before FLUID_SELECTION validation
 
-## [1.0.0] - 2024-01-XX
+## [1.0.0] - 2025-01-30
 
 ### Initial Release
 - Gas flow calculations: pipe pressure drop, blower sizing, control valve sizing

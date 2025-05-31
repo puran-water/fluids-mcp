@@ -9,14 +9,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="fluids-mcp",
-    version="1.1.0",
+    version="1.2.0",
     author="Puran Water LLC",
     author_email="engineering@puranwater.com",
     description="MCP server for fluid mechanics and hydraulics calculations",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/puran-water/fluids-mcp",
-    packages=find_packages(exclude=["tests", "tests.*"]),
+    packages=find_packages(include=["tools", "utils", "pydraulics"], exclude=["tests", "tests.*"]),
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -35,6 +35,7 @@ setup(
         "fluids>=1.0.26",
         "scipy>=1.10.0",
         "numpy>=1.24.0",
+        "sympy>=1.12.0",
         "CoolProp>=6.4.1",
         "fluidprop>=1.0.0",
     ],

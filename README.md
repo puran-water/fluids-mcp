@@ -62,6 +62,7 @@ Add to your Claude Desktop configuration file:
 **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
 **Linux**: `~/.config/claude/claude_desktop_config.json`
 
+**Windows Example:**
 ```json
 {
   "mcpServers": {
@@ -69,6 +70,21 @@ Add to your Claude Desktop configuration file:
       "command": "python",
       "args": [
         "C:\\Users\\YOUR_USERNAME\\mcp-servers\\fluids-mcp\\server.py"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+**macOS/Linux Example:**
+```json
+{
+  "mcpServers": {
+    "fluids-mcp": {
+      "command": "python",
+      "args": [
+        "/path/to/your/mcp-servers/fluids-mcp/server.py"
       ],
       "env": {}
     }

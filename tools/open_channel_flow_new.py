@@ -1,22 +1,11 @@
 import json
 import logging
 import math
-import sys
 import os
 from typing import Optional, Literal, Dict, Any, Tuple, Union, List
 
-# Add parent directory to sys.path to find pydraulics
+# Import from pydraulics (now properly packaged)
 try:
-    # Get the directory containing the current script
-    current_script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Get the parent directory (one level up)
-    parent_dir = os.path.dirname(current_script_dir)
-
-    # Add the parent directory to the Python path if it's not already there
-    if parent_dir not in sys.path:
-        sys.path.insert(0, parent_dir)
-
-    # Import from pydraulics
     from pydraulics.open_flow import (
         RectangularChannel,
         TrapezoidalChannel,
