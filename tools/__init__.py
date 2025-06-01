@@ -16,7 +16,7 @@ from .liquid_control_valve import calculate_liquid_control_valve
 from .gas_pipe_pressure_drop import calculate_gas_pipe_pressure_drop
 from .blower_compressor import calculate_blower_compressor_requirements
 from .gas_control_valve import calculate_gas_control_valve
-from .open_channel_flow import calculate_open_channel_flow
+from .open_channel_flow_new import calculate_open_channel_flow
 
 # List of currently implemented tools
 __all__ = [
