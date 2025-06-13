@@ -21,19 +21,20 @@ logger = logging.getLogger("fluids-mcp")
 mcp = FastMCP("fluids-calculator")
 
 # Import all tools
-from tools.pipe_pressure_drop import calculate_pipe_pressure_drop
+from tools.pipe_pressure_drop import calculate_pipe_pressure_drop, pipe_pressure_drop_sweep
 from tools.fluid_properties import get_fluid_properties, list_available_fluids
 from tools.reynolds_number import calculate_reynolds_number
 from tools.pump_requirements import calculate_pump_requirements
 from tools.pipe_properties import get_pipe_properties
 from tools.liquid_control_valve import calculate_liquid_control_valve
-from tools.gas_pipe_pressure_drop import calculate_gas_pipe_pressure_drop
-from tools.blower_compressor import calculate_blower_compressor_requirements
+from tools.gas_pipe_pressure_drop import calculate_gas_pipe_pressure_drop, gas_pipe_sweep
+from tools.blower_compressor import calculate_blower_compressor_requirements, blower_sweep
 from tools.gas_control_valve import calculate_gas_control_valve
 from tools.open_channel_flow_new import calculate_open_channel_flow
 
 # Register all tools with MCP
 mcp.tool()(calculate_pipe_pressure_drop)
+mcp.tool()(pipe_pressure_drop_sweep)
 mcp.tool()(get_fluid_properties)
 mcp.tool()(list_available_fluids)
 mcp.tool()(calculate_reynolds_number)
@@ -41,7 +42,9 @@ mcp.tool()(calculate_pump_requirements)
 mcp.tool()(get_pipe_properties)
 mcp.tool()(calculate_liquid_control_valve)
 mcp.tool()(calculate_gas_pipe_pressure_drop)
+mcp.tool()(gas_pipe_sweep)
 mcp.tool()(calculate_blower_compressor_requirements)
+mcp.tool()(blower_sweep)
 mcp.tool()(calculate_gas_control_valve)
 mcp.tool()(calculate_open_channel_flow)
 
@@ -50,17 +53,18 @@ from utils.import_helpers import FLUIDPROP_AVAILABLE, COOLPROP_AVAILABLE
 
 if __name__ == "__main__":
     logger.info("Starting Fluids MCP server...")
-    logger.info(f"FluidProp available: {FLUIDPROP_AVAILABLE}")
-    logger.info(f"CoolProp available: {COOLPROP_AVAILABLE}")
+    logger.info("FluidProp available: %s", FLUIDPROP_AVAILABLE)
+    logger.info("CoolProp available: %s", COOLPROP_AVAILABLE)
     
     if COOLPROP_AVAILABLE:
         from utils.import_helpers import get_coolprop_fluids_list
         fluids = get_coolprop_fluids_list()
-        logger.info(f"CoolProp fluids count: {len(fluids)}")
+        logger.info("CoolProp fluids count: %d", len(fluids))
     
     # Log which tools are registered
     logger.info("Registered tools:")
     logger.info("  - calculate_pipe_pressure_drop")
+    logger.info("  - pipe_pressure_drop_sweep")
     logger.info("  - get_fluid_properties")
     logger.info("  - list_available_fluids")
     logger.info("  - calculate_reynolds_number")
@@ -68,7 +72,9 @@ if __name__ == "__main__":
     logger.info("  - get_pipe_properties")
     logger.info("  - calculate_liquid_control_valve")
     logger.info("  - calculate_gas_pipe_pressure_drop")
+    logger.info("  - gas_pipe_sweep")
     logger.info("  - calculate_blower_compressor_requirements")
+    logger.info("  - blower_sweep")
     logger.info("  - calculate_gas_control_valve")
     logger.info("  - calculate_open_channel_flow")
     
