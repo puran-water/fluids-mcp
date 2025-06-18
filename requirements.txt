@@ -1,3 +1,6 @@
+# Fluids MCP Server Dependencies (v2.1)
+# Includes expert reviewer recommendations: EOS calculations, solve_for, sweep()
+
 # Core MCP dependencies
 mcp>=1.0.0
 httpx>=0.25.0
@@ -13,8 +16,12 @@ sympy>=1.12.0  # Required for pydraulics symbolic math
 CoolProp>=6.4.1
 fluidprop>=1.0.0
 
-# Optional but recommended
-pandas>=2.0.0  # For data handling in FluidProperties
+# NEW: Advanced thermodynamics for EOS calculations (v2.1)
+thermo>=0.4.0  # Chemical objects with Peng-Robinson EOS for integral-averaged Z and Cp
+
+# Enhanced features dependencies (promoted from optional)
+pandas>=2.0.0  # Required for sweep() function DataFrame output
+numpy>=1.24.0   # Required for sweep() function linspace (already included above)
 
 # Development dependencies (optional)
 pytest>=7.0.0

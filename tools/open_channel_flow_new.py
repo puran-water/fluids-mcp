@@ -4,6 +4,9 @@ import math
 import os
 from typing import Optional, Literal, Dict, Any, Tuple, Union, List
 
+# Scientific computing
+import scipy.optimize
+
 # Import from pydraulics (now properly packaged)
 try:
     from pydraulics.open_flow import (
@@ -37,6 +40,9 @@ except ImportError:
     fluids = None
     FLUIDS_AVAILABLE = False
     logging.error("Fluids library not found. Open channel calculations will fail.")
+
+# Import shared utilities
+from utils.constants import G_GRAVITY
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.open_channel_flow")
@@ -87,7 +93,7 @@ def calculate_open_channel_flow(
     error_log: List[str] = []
     calculated_results: Dict[str, Any] = {}
     geometry_params: Dict[str, float] = {}
-    g = 9.80665  # m/s² (standard gravity)
+    g = G_GRAVITY  # m/s² (standard gravity)
 
     # --- Validate basic inputs ---
     if channel_type not in ["rectangular", "trapezoidal", "circular", "triangular"]:
@@ -318,35 +324,53 @@ def calculate_open_channel_flow(
         Q_calc = calculate_q_from_y(y, chan_type, geom_params, S, n)
         return Q_calc - Q_target
 
-    # Secant method for finding normal depth
-    def secant_method(func, y0: float, y1: float, args: Tuple, tol: float = 1e-7, max_iter: int = 100) -> float:
-        """Find root of function using secant method."""
-        f0 = func(y0, *args)
-        for i in range(max_iter):
-            f1 = func(y1, *args)
-            if abs(f1) < tol:
-                return y1
-                
-            denom = (f1 - f0)
-            if abs(denom) < 1e-15:
-                # Prevent division by near-zero
-                y_next = y1 + (y1 - y0) * 0.01 if abs(y1) > 1e-6 else 0.01
-            else:
-                y_next = y1 - f1 * (y1 - y0) / denom
-
-            # Ensure positive depth
-            if y_next <= 0:
-                y_next = max(tol * (i + 1), y1 * 0.5)
-                
-            # Check convergence
-            if abs(y_next - y1) < tol * abs(y_next) + tol:
-                return y_next
-                
-            y0, f0 = y1, f1
-            y1 = y_next
+    # Robust root finding using scipy.optimize
+    def find_normal_depth(error_func, args: Tuple, channel_type: str, geometry_params: Dict[str, float]) -> float:
+        """Find normal depth using robust scipy methods with proper bracketing."""
+        
+        # Establish reasonable bounds for different channel types
+        y_min = 1e-6  # Very small positive depth
+        
+        if channel_type == "circular" and 'D' in geometry_params:
+            y_max = geometry_params['D'] * 0.99  # Just under full pipe
+        else:
+            y_max = 10.0  # Reasonable maximum depth for other channels
+        
+        # Try to establish brackets by testing error function at bounds
+        try:
+            f_min = error_func(y_min, *args)
+            f_max = error_func(y_max, *args)
             
-        logger.warning(f"Secant method did not converge within {max_iter} iterations.")
-        return y1
+            # Check if we have proper bracketing (opposite signs)
+            if f_min * f_max < 0:
+                # Use brentq for robust bracketed root finding
+                y_solution = scipy.optimize.brentq(
+                    error_func, y_min, y_max, args=args, 
+                    xtol=1e-8, rtol=1e-8, maxiter=100
+                )
+                return y_solution
+            else:
+                # No bracketing found, use fsolve as fallback
+                logger.info("No bracketing found, using fsolve as fallback")
+                # Use reasonable initial guess
+                if channel_type == "circular" and 'D' in geometry_params:
+                    initial_guess = geometry_params['D'] * 0.5  # Half full
+                else:
+                    initial_guess = 0.5  # 0.5 m depth
+                
+                result = scipy.optimize.fsolve(
+                    error_func, initial_guess, args=args, 
+                    xtol=1e-8, full_output=True
+                )
+                
+                if result[2] == 1:  # Successful convergence
+                    return float(result[0][0])
+                else:
+                    raise RuntimeError("fsolve failed to converge")
+                    
+        except Exception as e:
+            logger.error(f"Both brentq and fsolve failed: {e}")
+            raise RuntimeError(f"Root finding failed: {e}")
 
     # Main calculation
     try:
@@ -357,29 +381,13 @@ def calculate_open_channel_flow(
             Q_target = flow_rate_m3s
             results_log.append(f"Solving for normal depth, target Q={Q_target:.4f} m³/s.")
             
-            # Initial guesses for depth
-            y0 = 0.01  # Small positive guess
-            
-            if channel_type == "circular":
-                D = geometry_params['D']
-                # Use half-full flow for circular channel second guess
-                y1 = min(D * 0.6, 1.0)  # 60% full is close to maximum capacity
-                y0 = min(y0, D * 0.1)
-            else:
-                # For non-circular channels, choose a reasonable second guess
-                if channel_type == "rectangular" and 'b' in geometry_params:
-                    # Estimate based on width - simple approximation
-                    b = geometry_params['b']
-                    y1 = min(0.5, b * 0.2)
-                else:
-                    y1 = 0.5
-            
-            if abs(y0 - y1) < 1e-6:
-                y1 = y0 + 0.1
-
-            # Solve for normal depth using secant method
+            # Solve for normal depth using robust scipy methods
             args = (Q_target, channel_type, geometry_params, slope, manning_n)
-            y_sol = secant_method(manning_error_func, y0, y1, args)
+            try:
+                y_sol = find_normal_depth(manning_error_func, args, channel_type, geometry_params)
+            except RuntimeError as solve_error:
+                error_log.append(f"Solver failed: {solve_error}")
+                return json.dumps({"errors": error_log, "log": results_log})
             
             if y_sol <= 0:
                 error_log.append("Solver failed to find a positive depth.")

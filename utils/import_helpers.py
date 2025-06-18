@@ -49,7 +49,7 @@ def get_coolprop_fluids_list():
         fluids_string = CP.get_global_param_string("FluidsList")
         return fluids_string.split(',')
     except Exception as e:
-        logger.error(f"Error getting fluid list from CoolProp: {str(e)}")
+        logger.error("Error getting fluid list from CoolProp: %s", e)
         return []
 
 def get_fluid_properties(fluid_name, temperature_c, pressure_bar=1.01325):
@@ -68,7 +68,9 @@ def get_fluid_properties(fluid_name, temperature_c, pressure_bar=1.01325):
         return None
         
     try:
-        fluid_props = FluidProperties(
+        # Use cached version for better performance
+        from .property_cache import CachedFluidProperties
+        fluid_props = CachedFluidProperties(
             coolprop_name=fluid_name,
             T_in_deg_C=temperature_c,
             P_in_bar=pressure_bar
@@ -83,7 +85,7 @@ def get_fluid_properties(fluid_name, temperature_c, pressure_bar=1.01325):
             "kinematic_viscosity_m2s": float(fluid_props.nu[0])
         }
     except Exception as e:
-        logger.error(f"Error getting fluid properties for {fluid_name}: {str(e)}")
+        logger.error("Error getting fluid properties for %s: %s", fluid_name, e)
         return None
 
 def get_saturation_pressure(fluid_name, temperature_c):
@@ -101,12 +103,11 @@ def get_saturation_pressure(fluid_name, temperature_c):
         return None
         
     try:
-        from utils.constants import DEG_C_to_K
-        temp_k = temperature_c + DEG_C_to_K
-        # Use saturation pressure at the given temperature
-        return CP.PropsSI('P', 'T', temp_k, 'Q', 0, fluid_name)
+        # Use cached version for better performance
+        from .property_cache import cached_saturation_pressure
+        return cached_saturation_pressure(fluid_name, temperature_c)
     except Exception as e:
-        logger.error(f"Error getting saturation pressure for {fluid_name}: {str(e)}")
+        logger.error("Error getting saturation pressure for %s: %s", fluid_name, e)
         return None
 
 def get_critical_pressure(fluid_name):
@@ -123,7 +124,9 @@ def get_critical_pressure(fluid_name):
         return None
         
     try:
-        return CP.PropsSI('PCRIT', fluid_name)
+        # Use cached version for better performance
+        from .property_cache import cached_critical_pressure
+        return cached_critical_pressure(fluid_name)
     except Exception as e:
-        logger.error(f"Error getting critical pressure for {fluid_name}: {str(e)}")
+        logger.error("Error getting critical pressure for %s: %s", fluid_name, e)
         return None

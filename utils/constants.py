@@ -20,6 +20,9 @@ P_STD = 101325.0             # Standard pressure, Pa (15°C, 1 atm)
 T_STD = 288.15               # Standard temperature, K (15°C)
 R_UNIV = 8314.462            # Universal gas constant, J/(kmol·K)
 
+# Physical constants
+G_GRAVITY = 9.80665          # Standard gravity acceleration, m/s² (NIST value)
+
 # Default values
 DEFAULT_ROUGHNESS = 1.5e-5   # Default pipe roughness for general calculations, m
 DEFAULT_GAS_ROUGHNESS = 4.5e-5  # Default pipe roughness for gas calculations, m

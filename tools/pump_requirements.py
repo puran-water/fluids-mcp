@@ -13,7 +13,7 @@ import fluids.piping
 # Import shared utilities
 from utils.constants import (
     GPM_to_M3S, INCH_to_M, FT_to_M, PSI_to_PA, 
-    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS, DEG_C_to_K
+    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS, DEG_C_to_K, G_GRAVITY
 )
 from utils.helpers import get_fitting_K
 from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION, COOLPROP_AVAILABLE, CP
@@ -35,6 +35,10 @@ def calculate_pump_requirements(
     fluid_viscosity: Optional[float] = None,    # Fluid viscosity in Pa·s
     fluid_vapor_pressure: Optional[float] = None, # Fluid vapor pressure in Pa
     pipe_roughness: Optional[float] = None,     # Pipe roughness in m
+    
+    # --- Nozzle Diameters (for velocity head differential) ---
+    suction_nozzle_diameter: Optional[float] = None,  # Pump suction nozzle diameter in m
+    discharge_nozzle_diameter: Optional[float] = None, # Pump discharge nozzle diameter in m
 
     # --- Alternative Unit Inputs ---
     flow_rate_gpm: Optional[float] = None,        # Flow rate in US GPM
@@ -46,6 +50,10 @@ def calculate_pump_requirements(
     fluid_density_lbft3: Optional[float] = None,   # Fluid density in lb/ft³
     fluid_viscosity_cp: Optional[float] = None,    # Fluid viscosity in centipoise
     fluid_vapor_pressure_psi: Optional[float] = None, # Fluid vapor pressure in psi
+    
+    # --- Nozzle Diameters (Imperial) ---
+    suction_nozzle_diameter_in: Optional[float] = None,  # Pump suction nozzle diameter in inches
+    discharge_nozzle_diameter_in: Optional[float] = None, # Pump discharge nozzle diameter in inches
 
     # --- Property Lookup Inputs ---
     fluid_name: Optional[str] = None,            # e.g., "Water", "Air"
@@ -58,6 +66,10 @@ def calculate_pump_requirements(
     # --- Other Parameters ---
     atmospheric_pressure: float = 101325.0,       # Atmospheric pressure in Pa (can be overridden)
     atmospheric_pressure_psi: Optional[float] = None, # Allow overriding atm pressure in psi
+    suction_tank_pressure: Optional[float] = None,    # Suction tank pressure in Pa (absolute, overrides atmospheric)
+    suction_tank_pressure_psi: Optional[float] = None, # Suction tank pressure in psi (absolute)
+    target_tdh: Optional[float] = None,            # Target TDH in m (for solving flow rate or diameter)
+    target_tdh_ft: Optional[float] = None,         # Target TDH in ft (for solving flow rate or diameter) 
     suction_fittings: List[Dict[str, Union[str, int, float]]] = None,  # Suction line fittings
     discharge_fittings: List[Dict[str, Union[str, int, float]]] = None # Discharge line fittings
 ) -> str:
@@ -94,8 +106,16 @@ def calculate_pump_requirements(
         material: Pipe material name (e.g., "Steel", "PVC") for roughness lookup
         atmospheric_pressure: Atmospheric pressure in Pa (default: 101325.0)
         atmospheric_pressure_psi: Atmospheric pressure in psi (overrides Pa value if provided)
+        suction_tank_pressure: Suction tank pressure in Pa (absolute, overrides atmospheric for closed systems)
+        suction_tank_pressure_psi: Suction tank pressure in psi (absolute, overrides atmospheric for closed systems)
+        target_tdh: Target TDH in m (for solving flow rate or diameter)
+        target_tdh_ft: Target TDH in ft (for solving flow rate or diameter)
         suction_fittings: List of suction line fittings with type, quantity, and optionally K_value
         discharge_fittings: List of discharge line fittings with type, quantity, and optionally K_value
+        suction_nozzle_diameter: Pump suction nozzle diameter in m (for velocity head calculation)
+        discharge_nozzle_diameter: Pump discharge nozzle diameter in m (for velocity head calculation)
+        suction_nozzle_diameter_in: Pump suction nozzle diameter in inches
+        discharge_nozzle_diameter_in: Pump discharge nozzle diameter in inches
 
     Returns:
         JSON string with detailed pump sizing results including TDH, NPSHA, power estimate, and input resolution log.
@@ -348,14 +368,49 @@ def calculate_pump_requirements(
                 # If density/visc also failed, the previous error message is sufficient
 
 
-        # 6. Resolve Atmospheric Pressure
-        local_atmospheric_pressure = atmospheric_pressure # Default SI
-        if atmospheric_pressure_psi is not None:
-            local_atmospheric_pressure = atmospheric_pressure_psi * PSI_to_PA
+        # 6. Resolve Suction Side Pressure (Atmospheric or Tank Pressure)
+        local_suction_side_pressure = atmospheric_pressure # Default SI
+        suction_pressure_source = "Atmospheric (default)"
+        
+        # Check for tank pressure first (overrides atmospheric)
+        if suction_tank_pressure is not None:
+            local_suction_side_pressure = suction_tank_pressure
+            suction_pressure_source = "Tank pressure (SI)"
+            results_log.append(f"Used provided suction_tank_pressure ({suction_tank_pressure} Pa).")
+        elif suction_tank_pressure_psi is not None:
+            local_suction_side_pressure = suction_tank_pressure_psi * PSI_to_PA
+            suction_pressure_source = "Tank pressure (converted from psi)"
+            results_log.append(f"Used provided suction_tank_pressure_psi ({suction_tank_pressure_psi} psi).")
+        elif atmospheric_pressure_psi is not None:
+            local_suction_side_pressure = atmospheric_pressure_psi * PSI_to_PA
+            suction_pressure_source = "Atmospheric (converted from psi)"
             results_log.append(f"Used provided atmospheric_pressure_psi ({atmospheric_pressure_psi} psi).")
         else:
+            suction_pressure_source = "Atmospheric (default SI)"
             results_log.append(f"Used default atmospheric_pressure ({atmospheric_pressure} Pa).")
 
+        # 7. Resolve Target TDH (for solving scenarios)
+        local_target_tdh = None
+        if target_tdh is not None:
+            local_target_tdh = target_tdh
+            results_log.append("Used provided SI target_tdh.")
+        elif target_tdh_ft is not None:
+            local_target_tdh = target_tdh_ft * FT_to_M
+            results_log.append(f"Converted target_tdh from {target_tdh_ft} ft.")
+
+        # 8. Determine solve_for variable (basic capability)
+        specified_vars = {
+            'flow_rate': local_flow_rate,
+            'pipe_diameter': local_pipe_diameter
+        }
+        unknown_vars = [k for k, v in specified_vars.items() if v is None]
+        
+        solve_for = None
+        if local_target_tdh is not None and len(unknown_vars) == 1:
+            solve_for = unknown_vars[0]
+            results_log.append(f"Target TDH specified - solving for: {solve_for}")
+        elif len(unknown_vars) > 1 and local_target_tdh is not None:
+            error_log.append(f"Cannot solve: too many unknowns with target TDH. Specify flow_rate OR pipe_diameter when using target_tdh.")
 
         # --- Check for any errors before proceeding ---
         missing_critical = any(e.startswith("Missing required input") for e in error_log)
@@ -368,7 +423,7 @@ def calculate_pump_requirements(
             local_flow_rate, local_pipe_diameter, local_suction_pipe_length,
             local_discharge_pipe_length, local_static_suction_head, local_static_discharge_head,
             local_fluid_density, local_fluid_viscosity, local_fluid_vapor_pressure,
-            local_pipe_roughness, local_atmospheric_pressure
+            local_pipe_roughness, local_suction_side_pressure
         ]
         if any(v is None for v in critical_vars):
             error_log.append("Critical input parameter resolution failed after attempting conversions/lookups.")
@@ -377,25 +432,59 @@ def calculate_pump_requirements(
                 name for name, val in zip([
                     "flow_rate", "pipe_diameter", "suction_length", "discharge_length",
                     "static_suction_head", "static_discharge_head", "density", "viscosity",
-                    "vapor_pressure", "roughness", "atmospheric_pressure"
+                    "vapor_pressure", "roughness", "suction_side_pressure"
                 ], critical_vars) if val is None
             ]
             error_log.append(f"Missing resolved values for: {', '.join(missing_items)}")
             return json.dumps({"errors": error_log, "log": results_log})
 
 
+        # --- Resolve Nozzle Diameters for Velocity Head Differential ---
+        local_suction_nozzle_diameter = None
+        local_discharge_nozzle_diameter = None
+        
+        if suction_nozzle_diameter is not None:
+            local_suction_nozzle_diameter = suction_nozzle_diameter
+            results_log.append("Used provided SI suction_nozzle_diameter.")
+        elif suction_nozzle_diameter_in is not None:
+            local_suction_nozzle_diameter = suction_nozzle_diameter_in * INCH_to_M
+            results_log.append(f"Converted suction_nozzle_diameter from {suction_nozzle_diameter_in} inches.")
+        else:
+            # Default: assume nozzle diameter equals pipe diameter
+            local_suction_nozzle_diameter = local_pipe_diameter
+            results_log.append("Using pipe diameter as suction nozzle diameter (default assumption).")
+            
+        if discharge_nozzle_diameter is not None:
+            local_discharge_nozzle_diameter = discharge_nozzle_diameter
+            results_log.append("Used provided SI discharge_nozzle_diameter.")
+        elif discharge_nozzle_diameter_in is not None:
+            local_discharge_nozzle_diameter = discharge_nozzle_diameter_in * INCH_to_M
+            results_log.append(f"Converted discharge_nozzle_diameter from {discharge_nozzle_diameter_in} inches.")
+        else:
+            # Default: assume nozzle diameter equals pipe diameter
+            local_discharge_nozzle_diameter = local_pipe_diameter
+            results_log.append("Using pipe diameter as discharge nozzle diameter (default assumption).")
+
         # --- Core Calculation Logic ---
         suction_fittings_list = suction_fittings if suction_fittings else []
         discharge_fittings_list = discharge_fittings if discharge_fittings else []
 
-
-        area = math.pi * (local_pipe_diameter / 2) ** 2
-        if area == 0:
+        # --- Calculate Pipe and Nozzle Properties ---
+        pipe_area = math.pi * (local_pipe_diameter / 2) ** 2
+        if pipe_area == 0:
             return json.dumps({"error": "Pipe diameter resolved to zero.", "log": results_log})
-        velocity = local_flow_rate / area
+        pipe_velocity = local_flow_rate / pipe_area
+        
+        suction_nozzle_area = math.pi * (local_suction_nozzle_diameter / 2) ** 2
+        discharge_nozzle_area = math.pi * (local_discharge_nozzle_diameter / 2) ** 2
+        
+        if suction_nozzle_area == 0 or discharge_nozzle_area == 0:
+            return json.dumps({"error": "Nozzle diameter resolved to zero.", "log": results_log})
+            
+        suction_nozzle_velocity = local_flow_rate / suction_nozzle_area
+        discharge_nozzle_velocity = local_flow_rate / discharge_nozzle_area
 
-
-        Re = fluids.core.Reynolds(V=velocity, D=local_pipe_diameter, rho=local_fluid_density, mu=local_fluid_viscosity)
+        Re = fluids.core.Reynolds(V=pipe_velocity, D=local_pipe_diameter, rho=local_fluid_density, mu=local_fluid_viscosity)
         fd = fluids.friction.friction_factor(Re=Re, eD=local_pipe_roughness / local_pipe_diameter)
 
 
@@ -451,26 +540,45 @@ def calculate_pump_requirements(
         K_discharge_total = K_discharge_pipe + K_discharge_fittings
 
 
-        suction_head_loss = fluids.head_from_K(K=K_suction_total, V=velocity)
-        discharge_head_loss = fluids.head_from_K(K=K_discharge_total, V=velocity)
-        velocity_head = velocity ** 2 / (2 * 9.81)
+        suction_head_loss = fluids.head_from_K(K=K_suction_total, V=pipe_velocity)
+        discharge_head_loss = fluids.head_from_K(K=K_discharge_total, V=pipe_velocity)
+        
+        # Calculate velocity heads at pump nozzles
+        suction_velocity_head = suction_nozzle_velocity ** 2 / (2 * G_GRAVITY)
+        discharge_velocity_head = discharge_nozzle_velocity ** 2 / (2 * G_GRAVITY)
+        velocity_head_differential = discharge_velocity_head - suction_velocity_head
+
+        # TDH includes static head, friction losses, AND velocity head differential
+        tdh = ((local_static_discharge_head - local_static_suction_head) + 
+               discharge_head_loss + suction_head_loss + 
+               velocity_head_differential)
+        
+        results_log.append(f"TDH components: Static={local_static_discharge_head - local_static_suction_head:.3f}m, "
+                          f"Friction={discharge_head_loss + suction_head_loss:.3f}m, "
+                          f"Velocity={velocity_head_differential:.3f}m")
 
 
-        tdh = (local_static_discharge_head - local_static_suction_head) + discharge_head_loss + suction_head_loss # Note: Velocity head often excluded unless outlet velocity differs significantly from inlet, or for very precise work. Including static and friction losses is standard.
-        # Adjust TDH slightly to include velocity head if desired for comparison with simpler formulas, but typically static + friction is used.
-        # tdh_incl_vel_head = tdh + velocity_head # Optional calculation
-
-
-        # NPSHA = Absolute pressure at suction - Vapor pressure - Suction friction losses
-        npsha = (local_atmospheric_pressure / (local_fluid_density * 9.81) + # Pressure head on liquid surface
-                 local_static_suction_head -                                # Elevation relative to pump suction
-                 local_fluid_vapor_pressure / (local_fluid_density * 9.81) - # Vapor pressure head
-                 suction_head_loss)                                         # Friction losses in suction
+        # NPSHA = Suction side pressure - Vapor pressure - Suction friction losses - Suction velocity head
+        suction_pressure_head = local_suction_side_pressure / (local_fluid_density * G_GRAVITY)
+        vapor_pressure_head = local_fluid_vapor_pressure / (local_fluid_density * G_GRAVITY)
+        
+        npsha = (suction_pressure_head +                     # Pressure head on liquid surface (atmospheric or tank)
+                 local_static_suction_head -                 # Elevation relative to pump suction
+                 vapor_pressure_head -                       # Vapor pressure head
+                 suction_head_loss -                         # Friction losses in suction
+                 suction_velocity_head)                      # Velocity head at suction nozzle
+        
+        results_log.append(f"NPSHA calculation: {suction_pressure_source}")
+        results_log.append(f"NPSHA components: Suction_pressure={suction_pressure_head:.3f}m, "
+                          f"Static={local_static_suction_head:.3f}m, "
+                          f"Vapor={-vapor_pressure_head:.3f}m, "
+                          f"Friction={-suction_head_loss:.3f}m, "
+                          f"Velocity={-suction_velocity_head:.3f}m")
 
 
         # Approximate power - using a default efficiency
         pump_eff = 0.70 # Assumed efficiency - could be an input parameter
-        brake_power_watts = (local_fluid_density * 9.81 * local_flow_rate * tdh) / pump_eff if pump_eff > 0 else 0
+        brake_power_watts = (local_fluid_density * G_GRAVITY * local_flow_rate * tdh) / pump_eff if pump_eff > 0 else 0
         results_log.append(f"Power calculation based on assumed efficiency: {pump_eff*100:.1f}%")
 
 
@@ -483,17 +591,25 @@ def calculate_pump_requirements(
             # Core results with unit conversions
             "flow_rate_m3s": round(local_flow_rate, 6),
             "flow_rate_gpm": round(local_flow_rate / GPM_to_M3S, 2),
-            "velocity_m_s": round(velocity, 3),
+            "pipe_velocity_m_s": round(pipe_velocity, 3),
+            "suction_nozzle_velocity_m_s": round(suction_nozzle_velocity, 3),
+            "discharge_nozzle_velocity_m_s": round(discharge_nozzle_velocity, 3),
+            "suction_nozzle_diameter_m": round(local_suction_nozzle_diameter, 4),
+            "discharge_nozzle_diameter_m": round(local_discharge_nozzle_diameter, 4),
             "reynolds_number": round(Re, 2),
             "friction_factor": round(fd, 6),
+            "suction_velocity_head_m": round(suction_velocity_head, 4),
+            "discharge_velocity_head_m": round(discharge_velocity_head, 4),
+            "velocity_head_differential_m": round(velocity_head_differential, 4),
             "suction_head_loss_m": round(suction_head_loss, 3),
             "suction_head_loss_ft": round(suction_head_loss / FT_to_M, 3),
             "suction_fitting_details": suction_fitting_details,
             "discharge_head_loss_m": round(discharge_head_loss, 3),
             "discharge_head_loss_ft": round(discharge_head_loss / FT_to_M, 3),
             "discharge_fitting_details": discharge_fitting_details,
-            # "velocity_head_m": round(velocity_head, 3), # Often not reported directly in pump calcs
-            # "velocity_head_ft": round(velocity_head / FT_to_M, 3),
+            "suction_velocity_head_ft": round(suction_velocity_head / FT_to_M, 4),
+            "discharge_velocity_head_ft": round(discharge_velocity_head / FT_to_M, 4),
+            "velocity_head_differential_ft": round(velocity_head_differential / FT_to_M, 4),
             "total_dynamic_head_m": round(tdh, 3),
             "total_dynamic_head_ft": round(tdh / FT_to_M, 3),
             "npsha_m": round(npsha, 3),
