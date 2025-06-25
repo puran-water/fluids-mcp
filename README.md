@@ -5,14 +5,16 @@ A Model Context Protocol (MCP) server providing comprehensive fluid mechanics an
 ## Features
 
 ### Gas Flow Calculations
-- **Gas Pipe Pressure Drop**: Calculate pressure losses in gas piping systems using industry-standard methods (Weymouth, Panhandle A/B)
-- **Blower/Compressor Sizing**: Determine power requirements and discharge conditions for gas compression
+- **Gas Pipe Pressure Drop**: Calculate pressure losses with solve_for capabilities (flow, diameter, length, pressure)
+- **Blower/Compressor Sizing**: Determine power requirements with EOS-based property calculations
 - **Gas Control Valve Sizing**: Size control valves for gas service per IEC 60534 standards
+- **Parameter Sweeps**: Optimize with gas_pipe_sweep and blower_sweep for performance analysis
 
 ### Liquid Flow Calculations  
-- **Pipe Pressure Drop**: Calculate friction losses and head requirements for liquid piping systems
-- **Pump Requirements**: Determine Total Dynamic Head (TDH) and Net Positive Suction Head Available (NPSHa)
+- **Pipe Pressure Drop**: Calculate friction losses with solve_for capabilities (flow, diameter, pressure drop)
+- **Pump Requirements**: Determine TDH and NPSHa with velocity head corrections for different nozzle sizes
 - **Liquid Control Valve Sizing**: Size control valves for liquid service applications
+- **Parameter Sweeps**: Optimize designs with pipe_pressure_drop_sweep for systematic analysis
 
 ### Fluid Properties
 - **Property Lookup**: Access thermodynamic properties via CoolProp integration
@@ -129,13 +131,17 @@ Calculate pressure drop for biogas piping:
 
 | Tool | Description | Key Parameters |
 |------|-------------|----------------|
-| `calculate_pipe_pressure_drop` | Liquid pipe friction losses | flow_rate, pipe_diameter, length, fluid |
-| `calculate_pump_requirements` | Pump TDH and NPSHa | flow_rate, pipe_config, static_heads |
-| `calculate_gas_pipe_pressure_drop` | Gas pipe pressure drop | flow_rate, pressure, temperature, method |
-| `calculate_blower_compressor_requirements` | Compressor power | flow_rate, pressures, efficiency |
+| `calculate_pipe_pressure_drop` | Liquid pipe friction losses with solve_for | flow_rate, pipe_diameter, length, fluid |
+| `pipe_pressure_drop_sweep` | Parameter sweep for optimization | variable, start, stop, n, base_parameters |
+| `calculate_pump_requirements` | Pump TDH and NPSHa with velocity head | flow_rate, pipe_config, static_heads, nozzle_sizes |
+| `calculate_gas_pipe_pressure_drop` | Gas pipe with solve_for (P1,P2,L,Q,D) | flow_rate, pressure, temperature, method |
+| `gas_pipe_sweep` | Gas pipe parameter optimization | variable, start, stop, n, base_parameters |
+| `calculate_blower_compressor_requirements` | Compressor power with EOS | flow_rate, pressures, efficiency, use_eos_calculations |
+| `blower_sweep` | Blower parameter optimization | variable, start, stop, n, base_parameters |
 | `calculate_gas_control_valve` | Gas valve Cv | flow_rate, pressures, valve_type |
 | `calculate_liquid_control_valve` | Liquid valve Cv | flow_rate, pressure_drop, fluid |
-| `get_fluid_properties` | Thermodynamic properties | fluid_name, temperature, pressure |
+| `get_fluid_properties` | Thermodynamic properties | fluid_name, temperature_c, pressure_bar |
+| `list_available_fluids` | List all supported fluids | - |
 | `calculate_reynolds_number` | Flow regime | velocity, diameter, fluid_properties |
 | `get_pipe_properties` | Pipe dimensions | nominal_size, schedule, material |
 | `calculate_open_channel_flow` | Open channel hydraulics | channel_type, dimensions, slope |
@@ -153,10 +159,15 @@ Calculate pressure drop for biogas piping:
 - **Internal Calculations**: SI units for accuracy
 - **Output**: User-preferred units with clear labeling
 
-### Latest Version (v1.2.0)
+### Latest Version (v2.1.0)
+- **NEW**: Parameter sweep functions for all major calculations (pipe_pressure_drop_sweep, gas_pipe_sweep, blower_sweep)
+- **NEW**: Solve_for capabilities - automatically solve for any unknown variable
+- **NEW**: Enhanced pump calculations with velocity head corrections for different nozzle sizes
+- **NEW**: EOS-based thermodynamic calculations for improved accuracy
+- **NEW**: Support for solving gas pipe diameter and length (not just pressure/flow)
 - Professional-grade testing with comprehensive test suite
-- Robust property lookup for all common fluids including methane, air, water
-- Accurate unit conversions and valve sizing calculations
+- Robust property lookup for 120+ fluids via CoolProp
+- Accurate unit conversions and valve sizing per IEC standards
 - Enhanced package structure for reliable deployment
 - Cross-platform compatibility
 

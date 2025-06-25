@@ -5,6 +5,36 @@ All notable changes to the Fluids MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-06-18
+
+### Added
+- Parameter sweep functions for all major calculations (pipe_pressure_drop_sweep, gas_pipe_sweep, blower_sweep)
+- Solve_for capabilities - automatically solve for any unknown variable in calculations
+- Enhanced pump calculations with velocity head corrections for different nozzle sizes
+- EOS-based thermodynamic calculations using thermo library for improved accuracy
+- Support for solving gas pipe diameter and length (not just pressure/flow)
+- Integral-averaged Z-factor and Cp calculations for compressor calculations
+- Performance optimizations with property caching and vectorized calculations
+- Input resolver for flexible parameter handling
+
+### Fixed
+- MCP client parameter validation errors - replaced **kwargs with explicit parameters
+- Sweep functions now return JSON instead of pandas DataFrames for MCP compatibility
+- Import error with blower_sweep function alias
+
+### Changed
+- All sweep functions updated to use explicit parameters instead of **base_kwargs
+- Pump TDH calculations now properly account for velocity head differences between nozzles
+- NPSHA calculations include velocity head and closed tank pressure corrections
+- Gas pipe calculations support 5 variables (P1, P2, L, Q, D) with solve_for any 1
+- Enhanced error messages with clear guidance on missing parameters
+
+### Technical Details
+- Sweep functions: Converted from pandas DataFrame returns to JSON for MCP compatibility
+- Parameter structure: Eliminated **kwargs pattern for proper MCP parameter validation
+- Pump velocity head: V²/2g corrections applied based on actual nozzle diameters
+- Gas pipe solver: Extended from 4 to 5 variables with diameter solving capability
+
 ## [1.2.0] - 2025-01-31
 
 ### Added
