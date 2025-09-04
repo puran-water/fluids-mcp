@@ -218,7 +218,9 @@ class CachedFluidProperties:
             self.alpha = [props[6]]     # thermal diffusivity m²/s
             
             # Derived properties
-            self.Cv = [self.Cp[0] - 287.0]  # Approximate Cv (J/kg·K)
+            # Calculate specific gas constant from molecular weight
+            R_specific = 8314.46 / self.MW if self.MW > 0 else 287.0  # J/(kg·K)
+            self.Cv = [self.Cp[0] - R_specific]  # Cv = Cp - R for ideal gas approximation
             self.gamma = [self.Cp[0] / self.Cv[0]] if self.Cv[0] > 0 else [1.4]
             self.Z = [1.0]  # Compressibility factor (approximation)
             

@@ -18,6 +18,7 @@ from utils.constants import (
 )
 from utils.helpers import get_fitting_K
 from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION
+from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.calculate_gas_pipe_pressure_drop")
@@ -50,7 +51,10 @@ def calculate_gas_pipe_pressure_drop(
 
     # --- Calculation Options ---
     method: Literal["Weymouth", "Panhandle_A", "Panhandle_B", "IGT", "Oliphant", "Spitzglass_low", 
-                    "Spitzglass_high", "isothermal_darcy"] = "Weymouth"
+                    "Spitzglass_high", "isothermal_darcy"] = "Weymouth",
+    
+    # --- Fittings (optional) ---
+    fittings: Optional[list] = None,  # List of fittings with type, quantity, and optional K_value
 ) -> str:
     """Calculates compressible gas flow parameters (pressure drop, flow rate, or length) with flexible inputs.
 
@@ -78,6 +82,7 @@ def calculate_gas_pipe_pressure_drop(
         fluid_name: Optional - Common gas name ("Air", "Methane", etc.) for property lookup
         gas_composition_mol: Optional - Gas composition as mol fractions {component: fraction}
         method: Calculation method ("Weymouth", "Panhandle_A", etc.) (default: Weymouth)
+        fittings: Optional - List of fittings, each with 'type' and 'quantity', and optionally 'K_value'
 
     Returns:
         JSON string with calculated results, including the solved variable, and input resolution log.
@@ -238,37 +243,130 @@ def calculate_gas_pipe_pressure_drop(
         )
         if needs_resolution:
             lookup_status = "Not Attempted"
-            if fluid_name is not None:
+            # Pre-compute an average/representative pressure for property evaluation
+            avg_p_pa = None
+            if inlet_pressure is not None and outlet_pressure is not None:
+                avg_p_pa = (inlet_pressure + outlet_pressure) / 2.0
+            elif inlet_pressure is not None:
+                avg_p_pa = inlet_pressure
+            elif outlet_pressure is not None:
+                avg_p_pa = outlet_pressure
+
+            # 3a. Mixture composition support via thermo.Mixture
+            # If composition is provided, prefer mixture properties over single-fluid lookup
+            if gas_composition_mol is not None:
+                try:
+                    # Normalize composition if needed
+                    total_z = sum(gas_composition_mol.values()) if gas_composition_mol else 0.0
+                    if total_z <= 0:
+                        raise ValueError("Mixture composition has non-positive total fraction")
+                    if abs(total_z - 1.0) > 1e-6:
+                        results_log.append(f"Mixture fractions sum to {total_z:.6f}; normalizing to 1.0")
+                        gas_composition_mol = {k: v/total_z for k, v in gas_composition_mol.items()}
+
+                    # Prepare inputs for thermo.Mixture
+                    IDs = list(gas_composition_mol.keys())
+                    zs = [gas_composition_mol[k] for k in IDs]
+
+                    try:
+                        from thermo.mixture import Mixture
+                        thermo_available = True
+                    except Exception as _:
+                        thermo_available = False
+
+                    if not thermo_available:
+                        raise ImportError("thermo package not available for mixture properties")
+
+                    T_k = local_T_k
+                    P_pa = avg_p_pa if avg_p_pa is not None else 101325.0
+
+                    mix = Mixture(IDs=IDs, zs=zs, T=T_k, P=P_pa)
+
+                    # MW in g/mol; numerically equals kg/kmol
+                    if local_gas_mw is None and getattr(mix, 'MW', None):
+                        local_gas_mw = float(mix.MW)
+                        gas_prop_source["MW"] = "Mixture (thermo)"
+
+                    # gamma via isentropic_exponent, else Cp/Cv if available
+                    if local_gas_gamma is None:
+                        gamma_val = None
+                        try:
+                            gamma_val = float(mix.isentropic_exponent)
+                        except Exception:
+                            try:
+                                Cpg = float(mix.Cpg)
+                                Cvg = float(mix.Cvg)
+                                if Cvg > 0:
+                                    gamma_val = Cpg/Cvg
+                            except Exception:
+                                gamma_val = None
+                        if gamma_val and gamma_val > 1.0:
+                            local_gas_gamma = gamma_val
+                            gas_prop_source["gamma"] = "Mixture (thermo)"
+
+                    # Z factor
+                    if local_gas_z_factor is None:
+                        try:
+                            z_val = float(mix.Zg)
+                            if z_val > 0:
+                                local_gas_z_factor = z_val
+                                gas_prop_source["Z"] = "Mixture (thermo)"
+                        except Exception:
+                            pass
+
+                    # Viscosity
+                    if local_gas_viscosity is None:
+                        try:
+                            mu_val = float(mix.mug)
+                            if mu_val > 0:
+                                local_gas_viscosity = mu_val
+                                gas_prop_source["viscosity"] = "Mixture (thermo)"
+                        except Exception:
+                            pass
+
+                    gas_prop_info = {
+                        "mixture": True,
+                        "IDs": IDs,
+                        "zs": zs,
+                        "lookup_temp_c": temperature_c,
+                        "lookup_p_bar": (P_pa/1e5) if P_pa is not None else None,
+                    }
+                    lookup_status = "Mixture Success"
+                except Exception as mix_e:
+                    error_log.append(f"Warning: Mixture property calculation failed: {mix_e}")
+                    results_log.append("Falling back to single-fluid lookup or defaults")
+                    lookup_status = "Mixture Failed"
+
+            # 3b. Single-fluid property lookup via fluidprop/CoolProp
+            if fluid_name is not None and (
+                any(v is None for v in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity])
+            ):
                 results_log.append(f"Attempting property lookup for '{fluid_name}' at T={temperature_c} C.")
                 if FLUIDPROP_AVAILABLE:
                     try:
-                        avg_p_pa = (
-                            (inlet_pressure + outlet_pressure) / 2.0
-                            if inlet_pressure is not None and outlet_pressure is not None
-                            else inlet_pressure
-                        )
-                        lookup_p_bar = avg_p_pa / 100000.0 if avg_p_pa else 1.0
+                        lookup_p_bar = (avg_p_pa / 100000.0) if avg_p_pa else 1.0
 
-                        # Try FluidProperties directly first
+                        # Map fluid name through aliasing system first
+                        actual_fluid_name = map_fluid_name(fluid_name)
+                        
+                        # Try FluidProperties with mapped name
                         try:
                             fluid_props = FluidProperties(
-                                coolprop_name=fluid_name,
+                                coolprop_name=actual_fluid_name,
                                 T_in_deg_C=temperature_c,
                                 P_in_bar=lookup_p_bar
                             )
-                            actual_fluid_name = fluid_name
                         except Exception:
-                            # Fallback to FLUID_SELECTION validation if direct lookup fails
+                            # If mapped name fails, try FLUID_SELECTION validation
                             valid_fluids = [f[0] for f in FLUID_SELECTION]
-                            actual_fluid_name = fluid_name
-                            if fluid_name not in valid_fluids:
+                            if actual_fluid_name not in valid_fluids:
                                 match = next(
-                                    (f for f in valid_fluids if f.lower() == fluid_name.lower()), None
+                                    (f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None
                                 )
                                 if match:
                                     actual_fluid_name = match
                                 else:
-                                    raise ValueError(f"Fluid '{fluid_name}' not found in fluidprop.")
+                                    raise ValueError(f"Fluid '{fluid_name}' (mapped to '{actual_fluid_name}') not found in fluidprop.")
 
                             fluid_props = FluidProperties(
                                 coolprop_name=actual_fluid_name,
@@ -277,29 +375,62 @@ def calculate_gas_pipe_pressure_drop(
                             )
                         lookup_status = f"Lookup Success ({actual_fluid_name})"
 
+                        import math as _math
+
+                        def _is_bad(x):
+                            try:
+                                return x is None or (isinstance(x, float) and _math.isnan(x))
+                            except Exception:
+                                return False
+
+                        # MW
                         if local_gas_mw is None:
-                            local_gas_mw = float(fluid_props.MW) * 1000.0  # Convert kg/mol to kg/kmol
-                            gas_prop_source["MW"] = lookup_status
+                            try:
+                                mw_val = float(fluid_props.MW)
+                                if not _is_bad(mw_val) and mw_val > 0:
+                                    local_gas_mw = mw_val
+                                    gas_prop_source["MW"] = lookup_status
+                            except Exception:
+                                pass
+
+                        # gamma
                         if local_gas_gamma is None:
-                            # Safely access gamma attribute or calculate from Cp/Cv if available
-                            if hasattr(fluid_props, 'gamma'):
-                                local_gas_gamma = float(fluid_props.gamma[0])
-                                gas_prop_source["gamma"] = lookup_status
-                            elif hasattr(fluid_props, 'Cp') and hasattr(fluid_props, 'Cv') and float(fluid_props.Cv[0]) != 0:
-                                local_gas_gamma = float(fluid_props.Cp[0]) / float(fluid_props.Cv[0])
-                                gas_prop_source["gamma"] = lookup_status + " (Calculated Cp/Cv)"
-                            # If gamma can't be determined, it will fall back to default later
+                            gamma_val = None
+                            try:
+                                if hasattr(fluid_props, 'gamma'):
+                                    gamma_val = float(fluid_props.gamma[0])
+                                elif hasattr(fluid_props, 'Cp') and hasattr(fluid_props, 'Cv'):
+                                    cv = float(fluid_props.Cv[0])
+                                    cp = float(fluid_props.Cp[0])
+                                    if cv and not _is_bad(cv) and not _is_bad(cp):
+                                        gamma_val = cp/cv
+                            except Exception:
+                                gamma_val = None
+                            if gamma_val and gamma_val > 1.0:
+                                local_gas_gamma = gamma_val
+                                gas_prop_source["gamma"] = lookup_status + (" (Cp/Cv)" if 'Cp' in gas_prop_source.get('gamma','') else '')
+
+                        # Z factor
                         if local_gas_z_factor is None:
-                            # Safely access Z attribute
-                            if hasattr(fluid_props, 'Z'):
-                                local_gas_z_factor = float(fluid_props.Z[0])
-                                gas_prop_source["Z"] = lookup_status
-                            # Z not found, it will fall back to default later
+                            try:
+                                if hasattr(fluid_props, 'Z'):
+                                    z_val = float(fluid_props.Z[0])
+                                    if not _is_bad(z_val) and z_val > 0:
+                                        local_gas_z_factor = z_val
+                                        gas_prop_source["Z"] = lookup_status
+                            except Exception:
+                                pass
+
+                        # Viscosity
                         if local_gas_viscosity is None:
-                            if hasattr(fluid_props, 'eta'):
-                                local_gas_viscosity = float(fluid_props.eta[0])
-                                gas_prop_source["viscosity"] = lookup_status
-                            # If viscosity can't be determined, it will fall back to default later
+                            try:
+                                if hasattr(fluid_props, 'eta'):
+                                    mu_val = float(fluid_props.eta[0])
+                                    if not _is_bad(mu_val) and mu_val > 0:
+                                        local_gas_viscosity = mu_val
+                                        gas_prop_source["viscosity"] = lookup_status
+                            except Exception:
+                                pass
 
                         gas_prop_info = {
                             "name_used": actual_fluid_name,
@@ -307,6 +438,78 @@ def calculate_gas_pipe_pressure_drop(
                             "lookup_p_bar": lookup_p_bar,
                             "viscosity_pas": local_gas_viscosity
                         }
+
+                        # If any key properties are still missing or NaN (e.g., SO2 issues),
+                        # fall back to thermo.Chemical for robust values
+                        need_fallback = any(
+                            v is None for v in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity]
+                        )
+                        if need_fallback:
+                            try:
+                                from thermo.chemical import Chemical
+                                # Build candidate identifiers for Chemical
+                                cand = [actual_fluid_name]
+                                try:
+                                    import re as _re
+                                    spaced = _re.sub(r'(?<!^)(?=[A-Z])', ' ', actual_fluid_name)
+                                    cand.extend([spaced, spaced.lower(), actual_fluid_name.lower()])
+                                except Exception:
+                                    pass
+                                # Specific common formulas
+                                formula_map = {
+                                    'sulfurdioxide': 'SO2', 'sulfur dioxide': 'SO2', 'sulphur dioxide': 'SO2',
+                                    'carbondioxide': 'CO2', 'carbon dioxide': 'CO2',
+                                    'hydrogensulfide': 'H2S', 'hydrogen sulfide': 'H2S',
+                                }
+                                cand.extend([formula_map.get(c, c) for c in list(cand)])
+                                chem = None
+                                last_err = None
+                                for ident in cand:
+                                    try:
+                                        chem = Chemical(ident, T=local_T_k, P=(lookup_p_bar*1e5))
+                                        if chem and chem.P is not None:
+                                            break
+                                    except Exception as ee:
+                                        last_err = ee
+                                        chem = None
+                                if chem is not None:
+                                    # MW in g/mol
+                                    if local_gas_mw is None and getattr(chem, 'MW', None):
+                                        local_gas_mw = float(chem.MW)
+                                        gas_prop_source["MW"] = "thermo.Chemical fallback"
+                                    # gamma
+                                    if local_gas_gamma is None:
+                                        try:
+                                            Cpg = float(chem.Cpg)
+                                            Cvg = float(chem.Cvg)
+                                            if Cvg > 0:
+                                                local_gas_gamma = Cpg/Cvg
+                                                gas_prop_source["gamma"] = "thermo.Chemical fallback"
+                                        except Exception:
+                                            pass
+                                    # Z
+                                    if local_gas_z_factor is None:
+                                        try:
+                                            z_val = float(chem.Zg)
+                                            if z_val > 0:
+                                                local_gas_z_factor = z_val
+                                                gas_prop_source["Z"] = "thermo.Chemical fallback"
+                                        except Exception:
+                                            pass
+                                    # mu
+                                    if local_gas_viscosity is None:
+                                        try:
+                                            mu_val = float(chem.mug)
+                                            if mu_val > 0:
+                                                local_gas_viscosity = mu_val
+                                                gas_prop_source["viscosity"] = "thermo.Chemical fallback"
+                                        except Exception:
+                                            pass
+                                    results_log.append("Used thermo.Chemical fallback for missing/NaN properties")
+                                else:
+                                    error_log.append(f"Warning: thermo.Chemical fallback failed: {last_err}")
+                            except Exception as fb_e:
+                                error_log.append(f"Warning: Fallback to thermo.Chemical failed: {fb_e}")
 
                     except Exception as prop_lookup_e:
                         detailed_error = (
@@ -407,6 +610,66 @@ def calculate_gas_pipe_pressure_drop(
             results_log.append(f"Using P2 = {local_P2:.2f} Pa")
         if local_L is not None:
             results_log.append(f"Using L = {local_L:.2f} m")
+        
+        # Handle fittings with equivalent length method (if provided)
+        L_equivalent = 0
+        fitting_details = []
+        if fittings and local_L is not None and local_pipe_diameter is not None:
+            # For initial estimate, use average conditions if available
+            if local_P1 and local_P2:
+                P_avg_init = (local_P1 + local_P2) / 2
+            elif local_P1:
+                P_avg_init = local_P1 * 0.9  # Estimate outlet as 90% of inlet
+            elif local_P2:
+                P_avg_init = local_P2 * 1.1  # Estimate inlet as 110% of outlet
+            else:
+                P_avg_init = 101325  # Default to atmospheric
+            
+            # Calculate initial density and flow parameters
+            rho_avg_init = P_avg_init * local_gas_mw / (local_gas_z_factor * R_univ * local_T_k) if local_gas_mw else 1.2
+            area = math.pi * (local_pipe_diameter / 2) ** 2
+            Q_avg_init = local_flow_rate_kg_s / rho_avg_init if local_flow_rate_kg_s else 0
+            V_avg_init = Q_avg_init / area if Q_avg_init > 0 else 10  # Default 10 m/s if unknown
+            
+            # Calculate Reynolds number for K-factor estimation
+            Re_init = 1e6  # Default high Reynolds
+            if local_gas_viscosity and rho_avg_init > 0:
+                Re_init = rho_avg_init * V_avg_init * local_pipe_diameter / local_gas_viscosity
+            
+            # Calculate friction factor for equivalent length conversion
+            relative_roughness = local_pipe_roughness / local_pipe_diameter if local_pipe_roughness else 0.001
+            try:
+                f_init = fluids.friction.friction_factor(Re=Re_init, eD=relative_roughness)
+            except:
+                f_init = 0.02  # Default friction factor
+            
+            # Calculate K-factors and equivalent length
+            K_total = 0
+            for fitting in fittings:
+                fitting_type = fitting.get('type')
+                quantity = fitting.get('quantity', 1)
+                K_value = fitting.get('K_value')
+                
+                if K_value is None:
+                    # Use helper function to get K-factor
+                    K_value = get_fitting_K(fitting_type, local_pipe_diameter, Re_init, Q_avg_init)
+                    if K_value is None:
+                        K_value = 0.5  # Default if unknown
+                
+                K_total += K_value * quantity
+                fitting_details.append({
+                    'type': fitting_type,
+                    'quantity': quantity,
+                    'K_individual': K_value,
+                    'K_total': K_value * quantity
+                })
+            
+            # Convert to equivalent length
+            if f_init > 0:
+                L_equivalent = K_total * local_pipe_diameter / f_init
+                local_L = local_L + L_equivalent  # Add to pipe length
+                results_log.append(f"Added equivalent length for fittings: {L_equivalent:.2f} m (K_total={K_total:.3f})")
+                results_log.append(f"Effective length with fittings: {local_L:.2f} m")
 
         # Identify missing variable - NOW SUPPORTS DIAMETER AND LENGTH SOLVING
         specified_vars = {
@@ -677,6 +940,13 @@ def calculate_gas_pipe_pressure_drop(
 
     # --- Final Return ---
     if final_results:
+        # Add fitting details if present
+        if fitting_details:
+            final_results["fitting_details"] = fitting_details
+            final_results["L_equivalent_m"] = L_equivalent
+            final_results["L_pipe_m"] = pipe_length  # Original pipe length
+            final_results["L_effective_m"] = local_L  # Effective length with fittings
+        
         # Remove null keys before returning
         if not final_results.get("warnings"):
             final_results.pop("warnings", None)

@@ -14,6 +14,7 @@ from utils.constants import (
 )
 from utils.helpers import get_fitting_K
 from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION, COOLPROP_AVAILABLE, CP
+from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.calculate_liquid_control_valve")
@@ -145,13 +146,23 @@ def calculate_liquid_control_valve(
         elif fluid_name is not None and temperature_c is not None:
             if FLUIDPROP_AVAILABLE:
                 try: # Fluid property lookup
+                    # First try mapping common aliases
+                    mapped_fluid_name = map_fluid_name(fluid_name)
+                    
                     valid_fluids = [f[0] for f in FLUID_SELECTION]
-                    actual_fluid_name = fluid_name
-                    if fluid_name not in valid_fluids:
-                        fluid_lower = fluid_name.lower()
+                    actual_fluid_name = mapped_fluid_name
+                    
+                    # Handle incompressible fluids (glycols)
+                    if mapped_fluid_name.startswith('INCOMP::'):
+                        # For incompressible fluids, use directly with CoolProp
+                        actual_fluid_name = mapped_fluid_name
+                        # Note: FluidProperties may not handle INCOMP:: fluids well
+                        # This is a known limitation
+                    elif mapped_fluid_name not in valid_fluids:
+                        fluid_lower = mapped_fluid_name.lower()
                         match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)
                         if match: actual_fluid_name = match
-                        else: raise ValueError(f"Fluid '{fluid_name}' not found.")
+                        else: raise ValueError(f"Fluid '{fluid_name}' (mapped to '{mapped_fluid_name}') not found.")
 
 
                     p_bar = pressure_bar if pressure_bar is not None else 1.01325 # Default pressure

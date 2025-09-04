@@ -10,6 +10,7 @@ from utils.import_helpers import (
     FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION, 
     COOLPROP_AVAILABLE, CP, get_coolprop_fluids_list
 )
+from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.fluid_properties")
@@ -37,8 +38,11 @@ def get_fluid_properties(
             "error": "Fluid property lookup is not available. The fluidprop package is not installed."
         })
         
-    try:        
-        # First try getting complete list from CoolProp
+    try:
+        # First map the fluid name through aliasing system
+        mapped_fluid_name = map_fluid_name(fluid_name)
+        
+        # Then try getting complete list from CoolProp
         valid_fluids = get_coolprop_fluids_list()
         
         # If CoolProp list is not available, fall back to FLUID_SELECTION
@@ -50,27 +54,112 @@ def get_fluid_properties(
                 "error": "Could not retrieve fluid list from either CoolProp or FluidProp"
             })
             
-        if fluid_name not in valid_fluids:
+        # Check if INCOMP:: prefix fluids (glycols) should bypass validation
+        if mapped_fluid_name.startswith('INCOMP::'):
+            # Skip validation for incompressible fluids
+            pass
+        elif mapped_fluid_name not in valid_fluids:
             # Try case-insensitive match
-            fluid_lower = fluid_name.lower()
+            fluid_lower = mapped_fluid_name.lower()
             match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)
             if match:
-                fluid_name = match
+                mapped_fluid_name = match
             else:
                 # Return available fluids if not found
                 return json.dumps({
-                    "error": f"Fluid '{fluid_name}' not found",
+                    "error": f"Fluid '{fluid_name}' (mapped to '{mapped_fluid_name}') not found",
                     "available_fluids": valid_fluids[:10],  # Show first 10 fluids
                     "note": "Use 'list_available_fluids' tool for a complete list of valid fluids."
                 })
         
         # Get fluid properties
         fluid = FluidProperties(
-            coolprop_name=fluid_name,
+            coolprop_name=mapped_fluid_name,
             T_in_deg_C=temperature_c,
             P_in_bar=pressure_bar
         )
         
+        # Extract values
+        def _to_float(x):
+            try:
+                return float(x)
+            except Exception:
+                return None
+
+        def _is_bad(x):
+            try:
+                import math
+                return x is None or (isinstance(x, float) and math.isnan(x))
+            except Exception:
+                return False
+
+        rho = _to_float(fluid.rho[0])
+        eta = _to_float(fluid.eta[0])
+        nu = _to_float(fluid.nu[0])
+        k = _to_float(fluid.lambda_[0])
+        alpha = _to_float(fluid.alpha[0])
+        kappa = _to_float(fluid.kappa[0])
+        cp = _to_float(fluid.Cp[0])
+        cv = _to_float(fluid.Cv[0])
+        comp = _to_float(fluid.comp[0])
+        pr = _to_float(fluid.Pr[0])
+        mw = _to_float(fluid.MW)
+
+        # Fallback for NaN/missing values using thermo.Chemical (better SO2 support)
+        need_fallback = any(_is_bad(v) for v in [eta, cp, cv, mw])
+        if need_fallback:
+            try:
+                from thermo.chemical import Chemical
+                # Attempt with multiple identifiers if needed
+                cand = [mapped_fluid_name]
+                try:
+                    import re as _re
+                    spaced = _re.sub(r'(?<!^)(?=[A-Z])', ' ', mapped_fluid_name)
+                    cand.extend([spaced, spaced.lower(), mapped_fluid_name.lower()])
+                except Exception:
+                    pass
+                # Common formula fallbacks
+                formula_map = {
+                    'sulfurdioxide': 'SO2', 'sulfur dioxide': 'SO2', 'sulphur dioxide': 'SO2',
+                    'carbondioxide': 'CO2', 'carbon dioxide': 'CO2',
+                    'hydrogensulfide': 'H2S', 'hydrogen sulfide': 'H2S',
+                }
+                cand.extend([formula_map.get(c, c) for c in list(cand)])
+
+                chem = None
+                last_err = None
+                for ident in cand:
+                    try:
+                        chem = Chemical(ident, T=temperature_c + 273.15, P=pressure_bar*1e5)
+                        if chem and chem.P is not None:
+                            break
+                    except Exception as ee:
+                        chem = None
+                        last_err = ee
+
+                if chem is not None:
+                    # MW g/mol (== kg/kmol numerically)
+                    if _is_bad(mw) and getattr(chem, 'MW', None):
+                        mw = float(chem.MW)
+                    # eta
+                    if _is_bad(eta) and getattr(chem, 'mug', None):
+                        eta = float(chem.mug)
+                    # cp, cv
+                    if _is_bad(cp) and getattr(chem, 'Cpg', None):
+                        cp = float(chem.Cpg)
+                    if _is_bad(cv) and getattr(chem, 'Cvg', None):
+                        cv = float(chem.Cvg)
+                    # If kinematic viscosity missing but rho and mu known
+                    if _is_bad(nu) and rho and eta:
+                        try:
+                            nu = eta / rho
+                        except Exception:
+                            pass
+                else:
+                    logger.warning(f"thermo.Chemical fallback failed for {mapped_fluid_name}: {last_err}")
+            except Exception as fb_e:
+                logger.warning(f"Fallback to thermo.Chemical failed: {fb_e}")
+
         # Format the output
         result = {
             "fluid_name": fluid.coolprop_name,
@@ -78,19 +167,19 @@ def get_fluid_properties(
             "temperature_c": temperature_c,
             "pressure_bar": pressure_bar,
             # Physical properties
-            "density_kg_m3": float(fluid.rho[0]),
-            "dynamic_viscosity_pa_s": float(fluid.eta[0]),
-            "kinematic_viscosity_m2_s": float(fluid.nu[0]),
+            "density_kg_m3": rho,
+            "dynamic_viscosity_pa_s": eta,
+            "kinematic_viscosity_m2_s": nu,
             # Thermal properties
-            "thermal_conductivity_w_m_k": float(fluid.lambda_[0]),
-            "thermal_expansion_coefficient_1_k": float(fluid.alpha[0]),
-            "thermal_diffusivity_m2_s": float(fluid.kappa[0]),
-            "specific_heat_cp_j_kg_k": float(fluid.Cp[0]),
-            "specific_heat_cv_j_kg_k": float(fluid.Cv[0]),
+            "thermal_conductivity_w_m_k": k,
+            "thermal_expansion_coefficient_1_k": alpha,
+            "thermal_diffusivity_m2_s": kappa,
+            "specific_heat_cp_j_kg_k": cp,
+            "specific_heat_cv_j_kg_k": cv,
             # Other properties
-            "isothermal_compressibility_1_pa": float(fluid.comp[0]),
-            "prandtl_number": float(fluid.Pr[0]),
-            "molecular_weight_kg_mol": float(fluid.MW)
+            "isothermal_compressibility_1_pa": comp,
+            "prandtl_number": pr,
+            "molecular_weight_kg_mol": mw
         }
         
         return json.dumps(result)

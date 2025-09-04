@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "fluids-mcp": {
+      "type": "stdio",
+      "command": "/mnt/c/Users/hvksh/mcp-servers/venv/Scripts/python.exe",
+      "args": [
+        "C:\\Users\\hvksh\\mcp-servers\\fluids-mcp\\server.py"
+      ],
+      "env": {
+        "MCP_TIMEOUT": "600000",
+        "FLUIDS_MCP_ROOT": "C:\\Users\\hvksh\\mcp-servers\\fluids-mcp",
+        "MCP_SIMULATION_TIMEOUT_S": "280"
+      }
+    }
+  }
+}

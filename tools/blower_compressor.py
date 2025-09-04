@@ -115,7 +115,7 @@ def get_chemical_properties(fluid_name, T, P):
             gamma_val = None
         
         return {
-            'MW': chemical.MW * 1000.0,  # Convert kg/mol to kg/kmol
+            'MW': chemical.MW,  # Already in g/mol which numerically equals kg/kmol
             'gamma': gamma_val,
             'Z': chemical.Z,
             'Cp': chemical.Cp if hasattr(chemical, 'Cp') else None,
@@ -357,7 +357,7 @@ def calculate_blower_compressor_requirements(
                                 else: raise ValueError(f"Fluid '{fluid_name}' not found in fluidprop.")
 
                             fluid_props = FluidProperties(coolprop_name=actual_fluid_name, T_in_deg_C=inlet_temperature_c, P_in_bar=lookup_p_bar)
-                        if local_gas_mw is None: local_gas_mw = float(fluid_props.MW) * 1000.0  # Convert kg/mol to kg/kmol
+                        if local_gas_mw is None: local_gas_mw = float(fluid_props.MW)  # Already in kg/kmol from FluidProperties
                         if local_gas_gamma is None:
                             # Safely access gamma attribute or calculate from Cp/Cv if available
                             if hasattr(fluid_props, 'gamma'):
@@ -393,8 +393,8 @@ def calculate_blower_compressor_requirements(
                         temp_mw = sum(fluids.constants.MWs[comp] * frac for comp, frac in gas_composition_mol.items() if comp in fluids.constants.MWs)
                     else: # Fallback if constants not easily accessible
                         # Very rough MW estimation based on common biogas components
-                        mw_map = {'CH4': 16040, 'CO2': 44010, 'N2': 28010, 'H2S': 34080, 'O2': 32000, 'H2': 2016}  # kg/kmol
-                        temp_mw = sum(mw_map.get(comp, 28960) * frac for comp, frac in gas_composition_mol.items()) # Default to air MW if unknown
+                        mw_map = {'CH4': 16.04, 'CO2': 44.01, 'N2': 28.01, 'H2S': 34.08, 'O2': 32.00, 'H2': 2.016}  # kg/kmol
+                        temp_mw = sum(mw_map.get(comp, 28.96) * frac for comp, frac in gas_composition_mol.items()) # Default to air MW if unknown
 
                     if temp_mw > 0 and local_gas_mw is None:
                         local_gas_mw = temp_mw

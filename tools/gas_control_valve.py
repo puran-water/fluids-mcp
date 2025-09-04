@@ -21,6 +21,7 @@ from utils.constants import (
 )
 from utils.helpers import get_fitting_K
 from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION
+from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.gas_control_valve")
@@ -127,23 +128,24 @@ def calculate_gas_control_valve(
                         lookup_p_bar = (local_P1 / 100000.0) if local_P1 else 1.01325
                         
                         # Try FluidProperties directly first
+                        # Map fluid name through aliasing system first
+                        actual_fluid_name = map_fluid_name(fluid_name)
+                        
                         try:
                             fluid_props = FluidProperties(
-                                coolprop_name=fluid_name,
+                                coolprop_name=actual_fluid_name,
                                 T_in_deg_C=inlet_temperature_c,
                                 P_in_bar=lookup_p_bar
                             )
-                            actual_fluid_name = fluid_name
                         except Exception:
-                            # Fallback to FLUID_SELECTION validation if direct lookup fails
+                            # If mapped name fails, try FLUID_SELECTION validation
                             valid_fluids = [f[0] for f in FLUID_SELECTION]
-                            actual_fluid_name = fluid_name
-                            if fluid_name not in valid_fluids:
-                                match = next((f for f in valid_fluids if f.lower() == fluid_name.lower()), None)
+                            if actual_fluid_name not in valid_fluids:
+                                match = next((f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None)
                                 if match:
                                     actual_fluid_name = match
                                 else:
-                                    raise ValueError(f"Fluid '{fluid_name}' not found in fluidprop.")
+                                    raise ValueError(f"Fluid '{fluid_name}' (mapped to '{actual_fluid_name}') not found in fluidprop.")
 
                             fluid_props = FluidProperties(
                                 coolprop_name=actual_fluid_name,
@@ -151,7 +153,7 @@ def calculate_gas_control_valve(
                                 P_in_bar=lookup_p_bar
                             )
                         if local_gas_mw is None: 
-                            local_gas_mw = float(fluid_props.MW) * 1000.0  # Convert kg/mol to kg/kmol
+                            local_gas_mw = float(fluid_props.MW)  # Already in kg/kmol (numerically equal to g/mol)
                             gas_prop_source["MW"] = "Lookup"
                         if local_gas_gamma is None:
                             # Safely access gamma attribute or calculate from Cp/Cv if available
