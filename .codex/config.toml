@@ -1,0 +1,19 @@
+name = "fluids-agent"
+model = "gpt-5-codex"
+include_plan_tool = true
+
+[projects."/mnt/c/Users/hvksh"]
+trust_level = "trusted"
+
+[mcp_servers.fluids-mcp]
+command = "/mnt/c/Users/hvksh/mcp-servers/venv/Scripts/python.exe"
+args = [
+  "C:\\Users\\hvksh\\mcp-servers\\fluids-mcp\\server.py",
+]
+startup_timeout_ms = 600_000
+
+[mcp_servers.fluids-mcp.env]
+MCP_TIMEOUT = "600000"
+FLUIDS_MCP_ROOT = "C:\\Users\\hvksh\\mcp-servers\\fluids-mcp"
+MCP_SIMULATION_TIMEOUT_S = "280"
+
