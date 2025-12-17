@@ -28,11 +28,10 @@ jobs:
         pip install -r requirements.txt
         pip install pytest pytest-asyncio pytest-cov
 
+    - name: Install package
+      run: |
+        pip install -e .
+
     - name: Run tests with coverage
       run: |
         python -m pytest tests/ -v --cov=tools --cov=utils --cov=pydraulics --cov-report=term-missing
-
-    - name: Run legacy integration tests
-      run: |
-        python tests/test_fluids_mcp.py
-        python tests/test_fixes.py
