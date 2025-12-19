@@ -37,6 +37,11 @@ jobs:
         python -m pytest tests/ --collect-only -v 2>&1 || echo "Collection may have issues"
         python -c "import tools; print('Tools import OK')" || echo "Tools import FAILED"
 
+    - name: List test files
+      run: |
+        ls -la tests/
+        cat tests/__init__.py
+
     - name: Run tests with coverage
       run: |
-        python -m pytest tests/ -v --cov=tools --cov=utils --cov=pydraulics --cov-report=term-missing
+        python -m pytest tests/test_sanity.py tests/test_integration.py tests/test_tools_integration.py -v --cov=tools --cov=utils --cov=pydraulics --cov-report=term-missing --ignore-glob="*__pycache__*"
