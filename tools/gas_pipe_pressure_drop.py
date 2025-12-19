@@ -358,7 +358,7 @@ def calculate_gas_pipe_pressure_drop(
                             )
                         except Exception:
                             # If mapped name fails, try FLUID_SELECTION validation
-                            valid_fluids = [f[0] for f in FLUID_SELECTION]
+                            valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
                             if actual_fluid_name not in valid_fluids:
                                 match = next(
                                     (f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None

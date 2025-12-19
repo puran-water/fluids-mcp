@@ -148,8 +148,8 @@ def calculate_liquid_control_valve(
                 try: # Fluid property lookup
                     # First try mapping common aliases
                     mapped_fluid_name = map_fluid_name(fluid_name)
-                    
-                    valid_fluids = [f[0] for f in FLUID_SELECTION]
+
+                    valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
                     actual_fluid_name = mapped_fluid_name
                     
                     # Handle incompressible fluids (glycols)

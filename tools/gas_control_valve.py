@@ -139,7 +139,7 @@ def calculate_gas_control_valve(
                             )
                         except Exception:
                             # If mapped name fails, try FLUID_SELECTION validation
-                            valid_fluids = [f[0] for f in FLUID_SELECTION]
+                            valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
                             if actual_fluid_name not in valid_fluids:
                                 match = next((f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None)
                                 if match:
@@ -359,7 +359,7 @@ def calculate_gas_control_valve(
             calculated_Kv = fluids.control_valve.size_control_valve_g(
                 Q=local_Q_norm_m3hr / 3600.0,  # Convert m³/hr to m³/s for fluids library
                 T=local_T1_k,
-                MW=local_gas_mw / 1000.0,  # Convert kg/kmol to g/mol for fluids library
+                MW=local_gas_mw,  # MW already in kg/kmol (fluids library expects kg/kmol)
                 Z=local_gas_z_factor,
                 gamma=local_gas_gamma,
                 P1=local_P1,

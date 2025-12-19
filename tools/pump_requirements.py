@@ -300,7 +300,7 @@ def calculate_pump_requirements(
         elif fluid_name is not None and temperature_c is not None:
             if FLUIDPROP_AVAILABLE:
                 try: # Fluid property lookup
-                    valid_fluids = [f[0] for f in FLUID_SELECTION]
+                    valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
                     actual_fluid_name = fluid_name
                     if fluid_name not in valid_fluids:
                         fluid_lower = fluid_name.lower()
