@@ -145,10 +145,12 @@ logs/
 custom_fluids/*.json
 custom_fluids/*.csv
 
-# Local test files
-test_*.py
-!test_fluids_mcp.py
-!test_fixes.py
+# Local test files (root level only)
+/test_*.py
+!/test_fluids_mcp.py
+!/test_fixes.py
+# Allow test files in tests/ directory
+!tests/test_*.py
 
 # Archive folder (old versions)
 archive/
