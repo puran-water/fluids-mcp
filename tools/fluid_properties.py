@@ -33,9 +33,9 @@ def get_fluid_properties(
     Returns:
         Detailed fluid properties including density, viscosity, thermal properties, etc.
     """
-    if not FLUIDPROP_AVAILABLE:
+    if not FLUIDPROP_AVAILABLE or FLUID_SELECTION is None:
         return json.dumps({
-            "error": "Fluid property lookup is not available. The fluidprop package is not installed."
+            "error": "Fluid property lookup is not available. The fluidprop package is not installed or not properly initialized."
         })
         
     try:

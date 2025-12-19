@@ -123,7 +123,7 @@ def calculate_gas_control_valve(
             if fluid_name is not None:
                 gas_prop_source["source_info"] = f"Lookup ({fluid_name} @ {inlet_temperature_c} C)"
                 results_log.append(f"Attempting property lookup for '{fluid_name}'.")
-                if FLUIDPROP_AVAILABLE:
+                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
                     try:
                         lookup_p_bar = (local_P1 / 100000.0) if local_P1 else 1.01325
                         

@@ -332,7 +332,7 @@ def calculate_blower_compressor_requirements(
             if not prop_resolved:  # Only if EOS didn't work
                 gas_prop_source = f"Lookup ({fluid_name} @ {inlet_temperature_c} C)"
                 results_log.append(f"Attempting FluidProp property lookup for '{fluid_name}'.")
-                if FLUIDPROP_AVAILABLE:
+                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
                     try:
                         # Use average pressure for lookup if P1/P2 are known, else use 1 atm default
                         avg_p_pa = 101325.0

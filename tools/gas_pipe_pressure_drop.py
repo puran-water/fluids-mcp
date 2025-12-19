@@ -342,7 +342,7 @@ def calculate_gas_pipe_pressure_drop(
                 any(v is None for v in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity])
             ):
                 results_log.append(f"Attempting property lookup for '{fluid_name}' at T={temperature_c} C.")
-                if FLUIDPROP_AVAILABLE:
+                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
                     try:
                         lookup_p_bar = (avg_p_pa / 100000.0) if avg_p_pa else 1.0
 

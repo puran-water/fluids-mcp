@@ -144,7 +144,7 @@ def calculate_liquid_control_valve(
               results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
               prop_lookup_success = True
         elif fluid_name is not None and temperature_c is not None:
-            if FLUIDPROP_AVAILABLE:
+            if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
                 try: # Fluid property lookup
                     # First try mapping common aliases
                     mapped_fluid_name = map_fluid_name(fluid_name)
