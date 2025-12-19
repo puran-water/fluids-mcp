@@ -355,10 +355,10 @@ def calculate_pipe_pressure_drop(
              local_fluid_density = fluid_density_lbft3 * LBFT3_to_KGM3
              local_fluid_viscosity = fluid_viscosity_cp * CENTIPOISE_to_PAS
              results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
-        elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
+        elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
             # Internal lookup using fluidprop or similar
             try:
-                valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
+                valid_fluids = [f[0] for f in FLUID_SELECTION]
                 actual_fluid_name = fluid_name
                 
                 if fluid_name not in valid_fluids:

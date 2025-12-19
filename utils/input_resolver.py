@@ -171,7 +171,7 @@ class GasPropertiesInput(BaseModel):
         if any(x is None for x in [self.mw, self.gamma, self.z_factor]) and self.fluid_name:
             try:
                 from ..utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties
-                if FLUIDPROP_AVAILABLE:
+                if FLUIDPROP_AVAILABLE and FluidProperties is not None:
                     lookup_p_bar = (pressure_pa or 101325.0) / 100000.0
                     fluid_props = FluidProperties(
                         coolprop_name=self.fluid_name,

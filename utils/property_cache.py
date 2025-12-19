@@ -154,7 +154,10 @@ def cached_fluid_properties(fluid_name: str, temperature_c: float, pressure_bar:
     
     try:
         from .import_helpers import FluidProperties
-        
+
+        if FluidProperties is None:
+            raise ImportError("FluidProperties is not available (fluidprop package not installed)")
+
         # Create FluidProperties object (this is expensive)
         fluid_props = FluidProperties(
             coolprop_name=fluid_name,

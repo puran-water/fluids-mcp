@@ -106,9 +106,9 @@ def calculate_reynolds_number(
             results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
             calculation_method = "dynamic"
         # Priority 4: Fluid property lookup
-        elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
+        elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
             try:
-                valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
+                valid_fluids = [f[0] for f in FLUID_SELECTION]
                 actual_fluid_name = fluid_name
                 
                 if fluid_name not in valid_fluids:

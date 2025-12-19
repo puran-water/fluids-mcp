@@ -123,14 +123,14 @@ def calculate_gas_control_valve(
             if fluid_name is not None:
                 gas_prop_source["source_info"] = f"Lookup ({fluid_name} @ {inlet_temperature_c} C)"
                 results_log.append(f"Attempting property lookup for '{fluid_name}'.")
-                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
+                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
                     try:
                         lookup_p_bar = (local_P1 / 100000.0) if local_P1 else 1.01325
-                        
+
                         # Try FluidProperties directly first
                         # Map fluid name through aliasing system first
                         actual_fluid_name = map_fluid_name(fluid_name)
-                        
+
                         try:
                             fluid_props = FluidProperties(
                                 coolprop_name=actual_fluid_name,
@@ -139,7 +139,7 @@ def calculate_gas_control_valve(
                             )
                         except Exception:
                             # If mapped name fails, try FLUID_SELECTION validation
-                            valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
+                            valid_fluids = [f[0] for f in FLUID_SELECTION]
                             if actual_fluid_name not in valid_fluids:
                                 match = next((f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None)
                                 if match:

@@ -332,7 +332,7 @@ def calculate_blower_compressor_requirements(
             if not prop_resolved:  # Only if EOS didn't work
                 gas_prop_source = f"Lookup ({fluid_name} @ {inlet_temperature_c} C)"
                 results_log.append(f"Attempting FluidProp property lookup for '{fluid_name}'.")
-                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None:
+                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
                     try:
                         # Use average pressure for lookup if P1/P2 are known, else use 1 atm default
                         avg_p_pa = 101325.0
@@ -349,7 +349,7 @@ def calculate_blower_compressor_requirements(
                             actual_fluid_name = fluid_name
                         except Exception:
                             # Fallback to FLUID_SELECTION validation if direct lookup fails
-                            valid_fluids = [] if FLUID_SELECTION is None else [f[0] for f in FLUID_SELECTION]
+                            valid_fluids = [f[0] for f in FLUID_SELECTION]
                             actual_fluid_name = fluid_name
                             if fluid_name not in valid_fluids:
                                 match = next((f for f in valid_fluids if f.lower() == fluid_name.lower()), None)
