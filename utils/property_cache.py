@@ -197,38 +197,52 @@ def cached_fluid_properties(fluid_name: str, temperature_c: float, pressure_bar:
 class CachedFluidProperties:
     """
     Cached replacement for FluidProperties class.
-    
-    This provides the same interface as FluidProperties but uses cached lookups
-    for significant performance improvement.
+
+    This provides the same interface as FluidProperties but uses CoolProp
+    directly for cross-platform compatibility (avoids fluidprop package issues).
     """
-    
+
     def __init__(self, coolprop_name: str, T_in_deg_C: float, P_in_bar: float):
         self.coolprop_name = coolprop_name
         self.T_in_deg_C = T_in_deg_C
         self.P_in_bar = P_in_bar
-        
-        # Get cached properties
+
+        # Use CoolProp directly via cached_props_si
         try:
-            props = cached_fluid_properties(coolprop_name, T_in_deg_C, P_in_bar)
-            
-            # Unpack properties (maintaining FluidProperties interface)
-            self.rho = [props[0]]       # density kg/m³
-            self.eta = [props[1]]       # dynamic viscosity Pa·s  
-            self.lambda_ = [props[2]]   # thermal conductivity W/(m·K)
-            self.Cp = [props[3]]        # specific heat J/(kg·K)
-            self.MW = props[4]          # molecular weight kg/kmol
-            self.nu = [props[5]]        # kinematic viscosity m²/s
-            self.alpha = [props[6]]     # thermal diffusivity m²/s
-            
+            import CoolProp as CP
+
+            T_K = T_in_deg_C + 273.15
+            P_Pa = P_in_bar * 1e5
+
+            # Get properties using cached PropsSI calls
+            rho = cached_props_si('D', 'T', T_K, 'P', P_Pa, coolprop_name)  # density kg/m³
+            eta = cached_props_si('V', 'T', T_K, 'P', P_Pa, coolprop_name)  # viscosity Pa·s
+            lambda_ = cached_props_si('L', 'T', T_K, 'P', P_Pa, coolprop_name)  # conductivity W/(m·K)
+            Cp = cached_props_si('C', 'T', T_K, 'P', P_Pa, coolprop_name)  # specific heat J/(kg·K)
+            MW = cached_props_si('M', 'T', T_K, 'P', P_Pa, coolprop_name) * 1000  # mol weight kg/kmol
+
             # Derived properties
-            # Calculate specific gas constant from molecular weight
-            R_specific = 8314.46 / self.MW if self.MW > 0 else 287.0  # J/(kg·K)
-            self.Cv = [self.Cp[0] - R_specific]  # Cv = Cp - R for ideal gas approximation
-            self.gamma = [self.Cp[0] / self.Cv[0]] if self.Cv[0] > 0 else [1.4]
+            nu = eta / rho if rho > 0 else 1e-6  # kinematic viscosity m²/s
+            alpha = lambda_ / (rho * Cp) if (rho > 0 and Cp > 0) else 1e-7  # thermal diffusivity m²/s
+
+            # Store as lists to match FluidProperties interface
+            self.rho = [rho]
+            self.eta = [eta]
+            self.lambda_ = [lambda_]
+            self.Cp = [Cp]
+            self.MW = MW
+            self.nu = [nu]
+            self.alpha = [alpha]
+
+            # Derived properties for gas calculations
+            R_specific = 8314.46 / MW if MW > 0 else 287.0  # J/(kg·K)
+            Cv = Cp - R_specific  # Cv = Cp - R for ideal gas approximation
+            self.Cv = [Cv]
+            self.gamma = [Cp / Cv] if Cv > 0 else [1.4]
             self.Z = [1.0]  # Compressibility factor (approximation)
-            
+
         except Exception as e:
-            logger.error("Failed to get cached properties for %s: %s", coolprop_name, e)
+            logger.error("Failed to get CoolProp properties for %s: %s", coolprop_name, e)
             raise
 
 def get_cache_info() -> Dict[str, Any]:
