@@ -44,10 +44,13 @@ def get_fluid_properties(
         
         # Then try getting complete list from CoolProp
         valid_fluids = get_coolprop_fluids_list()
-        
+
         # If CoolProp list is not available, fall back to FLUID_SELECTION
         if not valid_fluids and FLUID_SELECTION:
-            valid_fluids = [f[0] for f in FLUID_SELECTION]
+            try:
+                valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
+            except (TypeError, IndexError):
+                valid_fluids = []
             
         if not valid_fluids:
             return json.dumps({

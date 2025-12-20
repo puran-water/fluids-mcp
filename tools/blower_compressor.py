@@ -349,9 +349,12 @@ def calculate_blower_compressor_requirements(
                             actual_fluid_name = fluid_name
                         except Exception:
                             # Fallback to FLUID_SELECTION validation if direct lookup fails
-                            valid_fluids = [f[0] for f in FLUID_SELECTION]
+                            try:
+                                valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
+                            except (TypeError, IndexError):
+                                valid_fluids = []
                             actual_fluid_name = fluid_name
-                            if fluid_name not in valid_fluids:
+                            if not valid_fluids or fluid_name not in valid_fluids:
                                 match = next((f for f in valid_fluids if f.lower() == fluid_name.lower()), None)
                                 if match: actual_fluid_name = match
                                 else: raise ValueError(f"Fluid '{fluid_name}' not found in fluidprop.")

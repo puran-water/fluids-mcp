@@ -149,7 +149,10 @@ def calculate_liquid_control_valve(
                     # First try mapping common aliases
                     mapped_fluid_name = map_fluid_name(fluid_name)
 
-                    valid_fluids = [f[0] for f in FLUID_SELECTION]
+                    try:
+                        valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
+                    except (TypeError, IndexError):
+                        valid_fluids = []
                     actual_fluid_name = mapped_fluid_name
                     
                     # Handle incompressible fluids (glycols)
@@ -158,7 +161,7 @@ def calculate_liquid_control_valve(
                         actual_fluid_name = mapped_fluid_name
                         # Note: FluidProperties may not handle INCOMP:: fluids well
                         # This is a known limitation
-                    elif mapped_fluid_name not in valid_fluids:
+                    elif not valid_fluids or mapped_fluid_name not in valid_fluids:
                         fluid_lower = mapped_fluid_name.lower()
                         match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)
                         if match: actual_fluid_name = match

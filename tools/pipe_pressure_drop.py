@@ -358,10 +358,13 @@ def calculate_pipe_pressure_drop(
         elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
             # Internal lookup using fluidprop or similar
             try:
-                valid_fluids = [f[0] for f in FLUID_SELECTION]
+                try:
+                    valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
+                except (TypeError, IndexError):
+                    valid_fluids = []
                 actual_fluid_name = fluid_name
-                
-                if fluid_name not in valid_fluids:
+
+                if not valid_fluids or fluid_name not in valid_fluids:
                     # Try case-insensitive match
                     fluid_lower = fluid_name.lower()
                     match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)

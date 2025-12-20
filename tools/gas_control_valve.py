@@ -139,8 +139,11 @@ def calculate_gas_control_valve(
                             )
                         except Exception:
                             # If mapped name fails, try FLUID_SELECTION validation
-                            valid_fluids = [f[0] for f in FLUID_SELECTION]
-                            if actual_fluid_name not in valid_fluids:
+                            try:
+                                valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
+                            except (TypeError, IndexError):
+                                valid_fluids = []
+                            if not valid_fluids or actual_fluid_name not in valid_fluids:
                                 match = next((f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None)
                                 if match:
                                     actual_fluid_name = match
