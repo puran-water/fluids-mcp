@@ -64,8 +64,8 @@ def cached_props_si(prop: str, input1_name: str, input1_val: float,
     start_time = time.time()
     
     try:
-        import CoolProp as CP
-        result = CP.PropsSI(prop, input1_name, input1_val, input2_name, input2_val, fluid_name)
+        from CoolProp.CoolProp import PropsSI
+        result = PropsSI(prop, input1_name, input1_val, input2_name, input2_val, fluid_name)
         
         # Update statistics
         elapsed_time = time.time() - start_time
@@ -209,8 +209,6 @@ class CachedFluidProperties:
 
         # Use CoolProp directly via cached_props_si
         try:
-            import CoolProp as CP
-
             T_K = T_in_deg_C + 273.15
             P_Pa = P_in_bar * 1e5
 
