@@ -39,8 +39,8 @@ jobs:
 
     - name: List test files
       run: |
-        ls -la tests/
-        cat tests/__init__.py
+        python -c "import os; print([f for f in os.listdir('tests') if f.endswith('.py')])"
+        python -c "print(open('tests/__init__.py').read())"
 
     - name: Run tests with coverage
       run: |
