@@ -5,6 +5,25 @@ All notable changes to the Fluids MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-12-22
+
+### Added
+- **orifice_restrictor**: New omnitool for fixed orifice (restriction plate) sizing per ISO 5167
+  - Sizing mode: Calculate orifice diameter from flow rate and target pressure drop
+  - Analysis ΔP mode: Calculate pressure drop for given orifice and flow
+  - Analysis flow mode: Calculate flow rate for given orifice and pressure drop
+  - Plate kit mode: Generate sensitivity table for commissioning flexibility
+- Reader-Harris-Gallagher discharge coefficient correlation (ISO 5167-2)
+- ISO 5167 validity checking with warnings for out-of-range conditions
+- Support for both liquid (incompressible) and gas (compressible) phases
+- Comprehensive test suite with 20 tests covering all modes and edge cases
+
+### Technical Details
+- Uses `differential_pressure_meter_solver()` from fluids library
+- Beta ratio limits: 0.1 ≤ β ≤ 0.75 per ISO 5167
+- Automatic fluid property lookup via FluidProp/CoolProp
+- Unit flexibility: mm, inch, or m for orifice diameter output
+
 ## [2.1.0] - 2025-06-18
 
 ### Added

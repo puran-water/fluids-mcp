@@ -27,6 +27,7 @@ from omnitools.pipe_sizing import pipe_sizing
 from omnitools.parameter_sweep import parameter_sweep
 from omnitools.properties import properties
 from omnitools.machine_requirements import machine_requirements
+from omnitools.orifice_restrictor import orifice_restrictor
 
 # Register omnitools with MCP
 mcp.tool()(pipe_flow)
@@ -35,6 +36,7 @@ mcp.tool()(pipe_sizing)
 mcp.tool()(parameter_sweep)
 mcp.tool()(properties)
 mcp.tool()(machine_requirements)
+mcp.tool()(orifice_restrictor)
 
 # Log information about available dependencies
 from utils.import_helpers import FLUIDPROP_AVAILABLE, COOLPROP_AVAILABLE
@@ -50,13 +52,14 @@ if __name__ == "__main__":
         logger.info("CoolProp fluids count: %d", len(fluids))
     
     # Log which omnitools are registered
-    logger.info("Registered omnitools (consolidated from 16 tools):")
+    logger.info("Registered omnitools (consolidated from 17 tools):")
     logger.info("  - pipe_flow: Unified liquid/gas pipe pressure drop calculations")
     logger.info("  - control_valve: Unified liquid/gas control valve sizing")
     logger.info("  - pipe_sizing: Unified liquid/gas pipe sizing optimization")
     logger.info("  - parameter_sweep: Unified parameter sweeps for all calculations")
     logger.info("  - properties: Unified fluid/pipe property lookups")
     logger.info("  - machine_requirements: Unified pump/compressor/hydraulic calculations")
+    logger.info("  - orifice_restrictor: Fixed orifice/restriction plate sizing")
     
     # Start the server
     mcp.run()

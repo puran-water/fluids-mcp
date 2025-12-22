@@ -12,7 +12,7 @@ Model Context Protocol server providing comprehensive fluid mechanics, thermodyn
 
 ## Overview
 
-This MCP server provides 6 consolidated omnitools that encapsulate 16+ specialized calculation methods:
+This MCP server provides 7 consolidated omnitools that encapsulate 17+ specialized calculation methods:
 
 1. **pipe_flow**: Unified liquid and gas pipe flow calculations with pressure drop analysis
 2. **control_valve**: Valve sizing for both liquid and gas service per IEC 60534
@@ -20,6 +20,7 @@ This MCP server provides 6 consolidated omnitools that encapsulate 16+ specializ
 4. **parameter_sweep**: Performance optimization through systematic parameter variation
 5. **properties**: Thermodynamic and physical property lookup for 120+ fluids and pipe dimensions
 6. **machine_requirements**: Pump, compressor, and hydraulic system design calculations
+7. **orifice_restrictor**: Fixed orifice/restriction plate sizing per ISO 5167
 
 ## Technical Capabilities
 
@@ -164,29 +165,50 @@ Pump, compressor, and hydraulic calculations.
 - **Reynolds**: Velocity, characteristic length, fluid properties
 - **Open Channel**: Channel geometry, slope, Manning coefficient
 
-**Returns:** 
+**Returns:**
 - Pump: TDH, NPSHA, power requirements
 - Compressor: Discharge temperature, power, efficiency
 - Reynolds: Reynolds number, flow regime
 - Open Channel: Flow rate, velocity, normal depth
+
+#### orifice_restrictor
+Fixed orifice (restriction plate) sizing per ISO 5167 with Reader-Harris-Gallagher Cd correlation.
+
+**Parameters:**
+- `mode`: "sizing", "analysis_dp", "analysis_flow", or "plate_kit"
+- `phase`: "liquid" or "gas" - Fluid type
+- **Sizing mode** (Q + ΔP → d): `flow_rate_m3_hr`, `pressure_drop_bar`, `nominal_size_in`
+- **Analysis ΔP mode** (Q + d → ΔP): `flow_rate_m3_hr`, `orifice_diameter_mm`, `nominal_size_in`
+- **Analysis flow mode** (d + ΔP → Q): `orifice_diameter_mm`, `pressure_drop_bar`, `nominal_size_in`
+- **Plate kit mode**: Same as sizing, plus `diameter_variability_percent`, `kit_sizes`
+- **Fluid**: `fluid_name`, `temperature_c`, or direct `fluid_density`, `fluid_viscosity`
+- **Gas**: Additional `gas_gamma` required for compressible flow
+
+**Returns:**
+- Sizing: Orifice diameter (mm/inch), beta ratio, velocities, ISO 5167 validity warnings
+- Analysis ΔP: Pressure drop at given flow and orifice size
+- Analysis flow: Flow rate at given orifice and pressure drop
+- Plate kit: Table of orifice sizes with corresponding ΔP for commissioning flexibility
 
 ## Technical Implementation
 
 ### Architecture
 ```
 fluids-mcp/
-├── server.py                # MCP server with 6 omnitool registrations
+├── server.py                # MCP server with 7 omnitool registrations
 ├── omnitools/              # Consolidated wrapper tools
 │   ├── pipe_flow.py        # Wraps liquid/gas pipe calculations
 │   ├── control_valve.py    # Wraps liquid/gas valve sizing
 │   ├── pipe_sizing.py      # Wraps optimal sizing algorithms
 │   ├── parameter_sweep.py  # Wraps all sweep functions
 │   ├── properties.py       # Wraps fluid/pipe properties
-│   └── machine_requirements.py  # Wraps pump/compressor/hydraulics
-├── tools/                  # 16+ core calculation engines
+│   ├── machine_requirements.py  # Wraps pump/compressor/hydraulics
+│   └── orifice_restrictor.py    # Fixed orifice sizing per ISO 5167
+├── tools/                  # 17+ core calculation engines
 │   ├── pipe_pressure_drop.py       # Liquid pipe calculations
 │   ├── gas_pipe_pressure_drop.py   # Gas pipe with mixtures
 │   ├── pump_requirements.py        # Pump TDH and NPSH
+│   ├── orifice_restrictor.py       # ISO 5167 orifice sizing
 │   ├── blower_compressor.py        # Compressor power
 │   ├── liquid_control_valve.py     # Liquid Cv calculation
 │   ├── gas_control_valve.py        # Gas Cv calculation
@@ -266,6 +288,7 @@ Common names are automatically mapped:
 
 ### Standards Compliance
 - **IEC 60534-2-1**: Control valve flow coefficients
+- **ISO 5167**: Orifice plate flow measurement and sizing
 - **ASME B36.10M**: Welded and seamless pipe dimensions
 - **ISA-75.01.01**: Control valve sizing equations
 - **Crane TP-410**: Flow of fluids through valves and fittings
@@ -318,6 +341,35 @@ control_valve(
     temperature_c=15,
     valve_type="globe"
 )
+```
+
+### Example 4: RO Permeate Backpressure Orifice
+```python
+# Size restriction orifice for RO permeate backpressure control
+orifice_restrictor(
+    mode="sizing",
+    phase="liquid",
+    flow_rate_m3_hr=82.5,
+    pressure_drop_bar=3.0,
+    nominal_size_in=4,
+    fluid_name="Water",
+    temperature_c=25
+)
+# Returns: orifice_diameter_mm=44.1, beta_ratio=0.43
+
+# Generate plate kit for commissioning flexibility
+orifice_restrictor(
+    mode="plate_kit",
+    phase="liquid",
+    flow_rate_m3_hr=82.5,
+    pressure_drop_bar=3.0,
+    nominal_size_in=4,
+    fluid_name="Water",
+    temperature_c=25,
+    diameter_variability_percent=20,
+    kit_sizes=5
+)
+# Returns: 5 plates from 35mm to 53mm with corresponding ΔP values
 ```
 
 ## Testing
