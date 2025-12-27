@@ -61,25 +61,39 @@ def solve_for_flow_rate(target_pressure_drop, pipe_diameter, pipe_length, fluid_
                 flow_rate, pipe_diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
             )
             return calculated_dp - target_pressure_drop
-        except:
+        except Exception as e:
+            logger.debug("Calculation failed at flow_rate=%s: %s", flow_rate, e)
             return float('inf')
-    
-    # Initial bounds for flow rate search
-    flow_min = 1e-6  # Very small flow
-    flow_max = 10.0   # Large flow rate
+
+    # Dynamic bounds based on velocity limits (0.1 to 10 m/s typical)
+    import math
+    area = math.pi * (pipe_diameter / 2) ** 2
+    flow_min = max(1e-8, 0.01 * area)   # Very slow flow (0.01 m/s)
+    flow_max = min(100.0, 30.0 * area)  # Fast flow (30 m/s - allow high for gases)
     
     # Find bounds where function changes sign
     try:
         result = brentq(pressure_drop_error, flow_min, flow_max, xtol=1e-8)
         return result
     except ValueError:
-        # If brentq fails, try a different approach
+        # If brentq fails, try expanding bounds geometrically and retry
+        from scipy.optimize import root_scalar
+        try:
+            # Use secant method with initial bracketing attempt
+            result = root_scalar(pressure_drop_error, method='secant', x0=flow_min, x1=flow_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except Exception:
+            pass
+
+        # Final fallback: minimize squared error but validate residual
         from scipy.optimize import minimize_scalar
-        result = minimize_scalar(lambda q: abs(pressure_drop_error(q)), bounds=(flow_min, flow_max), method='bounded')
+        result = minimize_scalar(lambda q: pressure_drop_error(q)**2, bounds=(flow_min, flow_max), method='bounded')
         if result.success:
-            return result.x
-        else:
-            raise ValueError("Failed to converge on flow rate solution")
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:  # Within 5% tolerance
+                return result.x
+        raise ValueError("Failed to converge on flow rate solution - no valid root found in search range")
 
 def solve_for_diameter(target_pressure_drop, flow_rate, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
     """Solve for pipe diameter given target pressure drop using numerical methods"""
@@ -93,23 +107,34 @@ def solve_for_diameter(target_pressure_drop, flow_rate, pipe_length, fluid_densi
                 flow_rate, diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
             )
             return calculated_dp - target_pressure_drop
-        except:
+        except Exception as e:
+            logger.debug("Calculation failed at diameter=%s: %s", diameter, e)
             return float('inf')
-    
-    # Initial bounds for diameter search
-    D_min = 0.001   # 1 mm
-    D_max = 2.0     # 2 meters
-    
+
+    # Dynamic bounds based on velocity limits
+    import math
+    # For velocity 0.1 to 30 m/s, D = sqrt(4Q / (pi*V))
+    D_min = max(0.001, math.sqrt(4 * flow_rate / (math.pi * 30.0)))  # Fast flow -> small diameter
+    D_max = min(3.0, math.sqrt(4 * flow_rate / (math.pi * 0.05)))    # Slow flow -> large diameter
+
     try:
         result = brentq(pressure_drop_error, D_min, D_max, xtol=1e-8)
         return result
     except ValueError:
-        from scipy.optimize import minimize_scalar
-        result = minimize_scalar(lambda d: abs(pressure_drop_error(d)), bounds=(D_min, D_max), method='bounded')
+        from scipy.optimize import root_scalar, minimize_scalar
+        try:
+            result = root_scalar(pressure_drop_error, method='secant', x0=D_min, x1=D_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except Exception:
+            pass
+
+        result = minimize_scalar(lambda d: pressure_drop_error(d)**2, bounds=(D_min, D_max), method='bounded')
         if result.success:
-            return result.x
-        else:
-            raise ValueError("Failed to converge on diameter solution")
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:
+                return result.x
+        raise ValueError("Failed to converge on diameter solution - no valid root found")
 
 def solve_for_length(target_pressure_drop, flow_rate, pipe_diameter, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
     """Solve for pipe length given target pressure drop using numerical methods"""
@@ -123,23 +148,32 @@ def solve_for_length(target_pressure_drop, flow_rate, pipe_diameter, fluid_densi
                 flow_rate, pipe_diameter, length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
             )
             return calculated_dp - target_pressure_drop
-        except:
+        except Exception as e:
+            logger.debug("Calculation failed at length=%s: %s", length, e)
             return float('inf')
-    
-    # Initial bounds for length search
+
+    # Length bounds - keep simple as length doesn't have velocity-based constraints
     L_min = 0.001   # 1 mm
-    L_max = 10000.0 # 10 km
-    
+    L_max = 100000.0 # 100 km for long pipelines
+
     try:
         result = brentq(pressure_drop_error, L_min, L_max, xtol=1e-8)
         return result
     except ValueError:
-        from scipy.optimize import minimize_scalar
-        result = minimize_scalar(lambda l: abs(pressure_drop_error(l)), bounds=(L_min, L_max), method='bounded')
+        from scipy.optimize import root_scalar, minimize_scalar
+        try:
+            result = root_scalar(pressure_drop_error, method='secant', x0=L_min, x1=L_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except Exception:
+            pass
+
+        result = minimize_scalar(lambda l: pressure_drop_error(l)**2, bounds=(L_min, L_max), method='bounded')
         if result.success:
-            return result.x
-        else:
-            raise ValueError("Failed to converge on length solution")
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:
+                return result.x
+        raise ValueError("Failed to converge on length solution - no valid root found")
 
 def calculate_pipe_pressure_drop(
     # --- Core SI Inputs (still supported) ---

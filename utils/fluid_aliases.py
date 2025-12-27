@@ -7,6 +7,16 @@ from typing import Optional
 
 logger = logging.getLogger("fluids-mcp.fluid_aliases")
 
+# Glycol-related fluid names that require special INCOMP:: format
+GLYCOL_FLUIDS = {
+    'glycol', 'ethylene glycol', 'ethyleneglycol', 'eg', 'meg',
+    'monoethylene glycol', 'monoethyleneglycol',
+    'propylene glycol', 'propyleneglycol', 'pg', 'mpg',
+    'monopropylene glycol', 'monopropyleneglycol',
+    'peg', 'deg', 'teg',  # polyethylene glycol variants
+    'antifreeze', 'coolant'
+}
+
 # Mapping of common aliases to CoolProp names
 FLUID_NAME_MAP = {
     # Ammonia variants
@@ -112,24 +122,40 @@ def normalize_fluid_name(name: str) -> str:
 def map_fluid_name(name: str, warn_on_fallback: bool = True) -> str:
     """
     Map a common fluid name or alias to a CoolProp-compatible name.
-    
+
     Args:
         name: Input fluid name (can be an alias)
         warn_on_fallback: Whether to log warnings for approximations
-        
+
     Returns:
         CoolProp-compatible fluid name
+
+    Raises:
+        ValueError: If a glycol fluid is requested without proper INCOMP:: format
     """
     if not name:
         return name
-    
+
     # First check if it's already a valid CoolProp name (case-sensitive)
     # This includes INCOMP:: and HEOS:: prefixes
     if name.startswith('INCOMP::') or name.startswith('HEOS::'):
         return name
-    
+
     # Normalize the input
     normalized = normalize_fluid_name(name)
+
+    # Check if this is a glycol fluid that requires INCOMP:: format
+    if normalized in GLYCOL_FLUIDS:
+        raise ValueError(
+            f"Glycol fluids like '{name}' require the INCOMP:: format with concentration. "
+            f"Examples:\n"
+            f"  - 'INCOMP::MEG[0.3]' for 30% monoethylene glycol\n"
+            f"  - 'INCOMP::MPG[0.5]' for 50% monopropylene glycol\n"
+            f"  - 'INCOMP::MEG[0.25]' for 25% ethylene glycol\n"
+            f"Or use the get_glycol_fluid_string() helper:\n"
+            f"  get_glycol_fluid_string('MEG', concentration_percent=30)\n"
+            f"See CoolProp INCOMP documentation for all available incompressible fluids."
+        )
     
     # Check the alias map
     if normalized in FLUID_NAME_MAP:
@@ -141,12 +167,6 @@ def map_fluid_name(name: str, warn_on_fallback: bool = True) -> str:
                 logger.warning(
                     f"'{name}' mapped to 'Methane'. This is an approximation. "
                     "For accurate natural gas calculations, provide gas composition."
-                )
-            elif normalized in ['glycol', 'ethylene glycol', 'ethyleneglycol', 'eg', 'meg',
-                               'propylene glycol', 'propyleneglycol', 'pg', 'mpg']:
-                logger.warning(
-                    f"'{name}' mapped to '{mapped_name}'. "
-                    "This assumes 30% concentration. Adjust if needed."
                 )
             elif normalized == 'lpg':
                 logger.warning(

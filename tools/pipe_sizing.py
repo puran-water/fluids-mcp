@@ -446,7 +446,8 @@ def select_gas_pipe_size_for_dp(
                             Cp = CP.PropsSI('Cpmass', 'T', temp_k, 'P', pressure_pa, fluid_name)
                             try:
                                 Cv = CP.PropsSI('Cvmass', 'T', temp_k, 'P', pressure_pa, fluid_name)
-                            except:
+                            except Exception as e:
+                                logger.debug("Cvmass lookup failed: %s, calculating from Cp-R", e)
                                 # If Cvmass fails, calculate from Cp and gas constant
                                 if MW is not None and MW > 0:
                                     R = 8314.46 / MW  # Specific gas constant (J/kg·K)
@@ -465,7 +466,8 @@ def select_gas_pipe_size_for_dp(
                                 else:
                                     gamma = 1.4
                                     log_messages.append(f"Using default gamma: 1.4")
-                        except:
+                        except Exception as e:
+                            logger.debug("Cpmass lookup failed: %s", e)
                             # If Cpmass also fails, try Cp0mass as last resort
                             try:
                                 Cp0 = CP.PropsSI('Cp0mass', 'T', temp_k, 'P', pressure_pa, fluid_name)
@@ -476,7 +478,8 @@ def select_gas_pipe_size_for_dp(
                                     log_messages.append("Using ideal gas Cp0 with calculated Cv")
                                 else:
                                     gamma = None
-                            except:
+                            except Exception as e:
+                                logger.debug("Cp0mass lookup also failed: %s", e)
                                 gamma = None
                     
                     if gamma is not None:

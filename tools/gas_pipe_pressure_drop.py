@@ -646,7 +646,8 @@ def calculate_gas_pipe_pressure_drop(
             relative_roughness = local_pipe_roughness / local_pipe_diameter if local_pipe_roughness else 0.001
             try:
                 f_init = fluids.friction.friction_factor(Re=Re_init, eD=relative_roughness)
-            except:
+            except Exception as e:
+                logger.debug("Friction factor calculation failed: %s, using default", e)
                 f_init = 0.02  # Default friction factor
             
             # Calculate K-factors and equivalent length

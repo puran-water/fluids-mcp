@@ -111,7 +111,8 @@ def get_chemical_properties(fluid_name, T, P):
             
             if cv_val is not None and cv_val > 0 and hasattr(chemical, 'Cp'):
                 gamma_val = chemical.Cp / cv_val
-        except:
+        except Exception as e:
+            logger.debug("Gamma calculation failed: %s", e)
             gamma_val = None
         
         return {

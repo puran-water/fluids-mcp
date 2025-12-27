@@ -196,7 +196,8 @@ def calculate_open_channel_flow(
                             Rh = float(channel.rh) if channel.rh is not None else (A/P if P > 0 else None)
                             T = float(channel.tw) if channel.tw is not None else b
                             Dh = float(channel.dh) if channel.dh is not None else y
-                    except:
+                    except Exception as e:
+                        logger.debug("Rectangular channel calc failed: %s", e)
                         pass  # Fall back to direct calculations
 
             elif chan_type == "trapezoidal":
@@ -223,7 +224,8 @@ def calculate_open_channel_flow(
                             Rh = float(channel.rh) if channel.rh is not None else (A/P if P > 0 else None)
                             T = float(channel.tw) if channel.tw is not None else (b + 2*z*y)
                             Dh = float(channel.dh) if channel.dh is not None else (A/T if T > 0 else None)
-                    except:
+                    except Exception as e:
+                        logger.debug("Trapezoidal channel calc failed: %s", e)
                         pass  # Fall back to direct calculations
 
             elif chan_type == "circular":
@@ -260,7 +262,8 @@ def calculate_open_channel_flow(
                             Rh = float(channel.rh) if channel.rh is not None else (A/P if P > 0 else None)
                             T = float(channel.tw) if channel.tw is not None else T
                             Dh = float(channel.dh) if channel.dh is not None else (A/T if T > 0 else None)
-                    except:
+                    except Exception as e:
+                        logger.debug("Circular channel calc failed: %s", e)
                         pass  # Fall back to direct calculations
 
             elif chan_type == "triangular":
@@ -286,7 +289,8 @@ def calculate_open_channel_flow(
                             Rh = float(channel.rh) if channel.rh is not None else (A/P if P > 0 else None)
                             T = float(channel.tw) if channel.tw is not None else (2*z*y)
                             Dh = float(channel.dh) if channel.dh is not None else (A/T if T > 0 else None)
-                    except:
+                    except Exception as e:
+                        logger.debug("Triangular channel calc failed: %s", e)
                         pass  # Fall back to direct calculations
             else:
                 return None, None, None, None, None
@@ -311,7 +315,8 @@ def calculate_open_channel_flow(
             try:
                 V = fluids.open_flow.V_Manning(Rh=Rh, S=S, n=n)
                 return V * A
-            except:
+            except Exception as e:
+                logger.debug("Manning velocity calc failed: %s", e)
                 pass
         
         # Direct calculation as fallback

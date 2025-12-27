@@ -11,21 +11,27 @@ import fluids.fittings
 
 logger = logging.getLogger("fluids-mcp.helpers")
 
-def get_fitting_K(fitting_type: str, diameter: float, Re: float, flow_rate: float) -> float:
+def get_fitting_K(fitting_type: str, diameter: float, Re: float, flow_rate: float,
+                  flow_split: float = 0.5) -> float:
     """Maps user-friendly fitting names to comprehensive fluids.fittings library calls.
-    
+
     Enhanced to cover all 79 fluids.fittings functions organized by category.
     Uses engineering-friendly names with intelligent parameter defaults.
-    
+
     Args:
         fitting_type: User-friendly fitting name (case-insensitive)
         diameter: Pipe inner diameter in meters
         Re: Reynolds number
         flow_rate: Flow rate in m³/s
-    
+        flow_split: For tee fittings, fraction of flow in main run (0-1).
+                   Default 0.5 (equal split). Only affects tee_combining/tee_dividing.
+
     Returns:
         K-value for the fitting
-        
+
+    Raises:
+        ValueError: If fitting_type is not recognized
+
     Categories covered:
         - Valves (gate, globe, ball, butterfly, plug, needle, etc.)
         - Check Valves (swing, lift, tilting disk, stop)
@@ -185,14 +191,16 @@ def get_fitting_K(fitting_type: str, diameter: float, Re: float, flow_rate: floa
                 D_run=diameter, D_branch=diameter, Q_run=0, Q_branch=flow_rate
             )
         elif fitting_type in ["tee_combining", "tee_converging", "combining_tee"]:
-            # Two flows combining into one
+            # Two flows combining into one - uses flow_split parameter
             return fluids.fittings.K_run_converging_Crane(
-                D_run=diameter, D_branch=diameter, Q_run=flow_rate*0.6, Q_branch=flow_rate*0.4
+                D_run=diameter, D_branch=diameter,
+                Q_run=flow_rate * flow_split, Q_branch=flow_rate * (1 - flow_split)
             )
         elif fitting_type in ["tee_dividing", "tee_diverging", "dividing_tee"]:
-            # One flow dividing into two
+            # One flow dividing into two - uses flow_split parameter
             return fluids.fittings.K_run_diverging_Crane(
-                D_run=diameter, D_branch=diameter, Q_run=flow_rate*0.6, Q_branch=flow_rate*0.4
+                D_run=diameter, D_branch=diameter,
+                Q_run=flow_rate * flow_split, Q_branch=flow_rate * (1 - flow_split)
             )
             
         # === SPECIALTY FITTINGS ===
@@ -232,13 +240,35 @@ def get_fitting_K(fitting_type: str, diameter: float, Re: float, flow_rate: floa
             
         # === DEFAULT CASE ===
         else:
-            logger.warning(f"K value calculation not implemented for fitting type: '{fitting_type}'. " +
-                         f"Available types include: valves (gate, globe, ball, butterfly, plug), " +
-                         f"check valves (swing, lift, tilting), bends (90_elbow, 45_elbow, miter), " +
-                         f"entrances (sharp, rounded, beveled), exits (normal, rounded), " +
-                         f"expansions/contractions (gradual, sudden), tees (run, branch), " +
-                         f"and specialty fittings (strainer, reducer, orifice). Assuming K=0.")
-            return 0.0
+            # Raise error instead of silently returning K=0 (which underestimates pressure drop)
+            valid_types = [
+                # Valves
+                "gate_valve", "gate_valve_open", "gate_valve_half", "gate_valve_quarter",
+                "globe_valve", "globe_valve_angle", "angle_globe_valve",
+                "ball_valve", "ball_valve_half", "ball_valve_quarter",
+                "butterfly_valve", "plug_valve", "diaphragm_valve", "needle_valve",
+                # Check valves
+                "check_valve", "check_valve_swing", "check_valve_lift", "check_valve_tilting", "check_valve_stop",
+                # Bends
+                "90_elbow", "elbow_90", "45_elbow", "elbow_45", "30_elbow", "60_elbow",
+                "miter_bend_90", "miter_bend_45", "coil_bend",
+                # Entrances
+                "entrance_sharp", "entrance_rounded", "entrance_beveled", "entrance_angled",
+                # Exits
+                "exit_normal", "exit", "exit_rounded",
+                # Expansions/Contractions
+                "expansion_gradual", "expansion_sudden", "contraction_gradual", "contraction_sudden",
+                "orifice", "orifice_plate",
+                # Tees
+                "tee_run", "tee_branch", "tee_combining", "tee_dividing",
+                # Specialty
+                "strainer", "reducer", "union", "coupling", "venturi", "flow_nozzle"
+            ]
+            raise ValueError(
+                f"Unknown fitting type: '{fitting_type}'. "
+                f"Valid types include: {', '.join(valid_types[:15])}... (see help_resources for full list). "
+                f"Alternatively, provide a custom K_value in the fitting dict."
+            )
             
     except Exception as e:
         logger.error(f"Error calculating K-value for fitting '{fitting_type}': {e}")

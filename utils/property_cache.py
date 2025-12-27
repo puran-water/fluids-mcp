@@ -6,11 +6,88 @@ performance for repeated property lookups with the same conditions.
 """
 
 import logging
+import math
 from functools import lru_cache
 from typing import Optional, Tuple, Any, Dict
 import time
 
+from .json_helpers import is_valid_number
+
 logger = logging.getLogger("fluids-mcp.property_cache")
+
+
+def validate_coolprop_result(value: float, prop_name: str, fluid_name: str,
+                              T_K: float = None, P_Pa: float = None) -> float:
+    """
+    Validate a CoolProp property result for physically meaningful values.
+
+    CoolProp returns _HUGE (approximately 1e308) for invalid states,
+    inf for some error conditions, and nan for failed calculations.
+
+    Args:
+        value: The property value from CoolProp
+        prop_name: Name of the property (for error messages)
+        fluid_name: Name of the fluid (for error messages)
+        T_K: Temperature in Kelvin (optional, for error messages)
+        P_Pa: Pressure in Pascals (optional, for error messages)
+
+    Returns:
+        The validated value
+
+    Raises:
+        ValueError: If the value is invalid (inf, nan, or _HUGE)
+    """
+    if not is_valid_number(value):
+        conditions = []
+        if T_K is not None:
+            conditions.append(f"T={T_K-273.15:.1f}°C")
+        if P_Pa is not None:
+            conditions.append(f"P={P_Pa/1e5:.2f} bar")
+        cond_str = f" at {', '.join(conditions)}" if conditions else ""
+
+        raise ValueError(
+            f"CoolProp returned invalid value for {prop_name} of {fluid_name}{cond_str}. "
+            f"Value={value}. This may indicate the fluid is outside its valid state range "
+            f"(e.g., supercritical, two-phase, or beyond property limits)."
+        )
+    return value
+
+
+def validate_properties_dict(properties: Dict[str, float], fluid_name: str,
+                             T_K: float = None, P_Pa: float = None) -> Dict[str, float]:
+    """
+    Validate a dictionary of fluid properties.
+
+    Args:
+        properties: Dictionary of property name -> value
+        fluid_name: Name of the fluid (for error messages)
+        T_K: Temperature in Kelvin (optional)
+        P_Pa: Pressure in Pascals (optional)
+
+    Returns:
+        The validated properties dictionary
+
+    Raises:
+        ValueError: If any property value is invalid
+    """
+    invalid_props = []
+    for name, value in properties.items():
+        if value is not None and not is_valid_number(value):
+            invalid_props.append(f"{name}={value}")
+
+    if invalid_props:
+        conditions = []
+        if T_K is not None:
+            conditions.append(f"T={T_K-273.15:.1f}°C")
+        if P_Pa is not None:
+            conditions.append(f"P={P_Pa/1e5:.2f} bar")
+        cond_str = f" at {', '.join(conditions)}" if conditions else ""
+
+        raise ValueError(
+            f"Invalid CoolProp properties for {fluid_name}{cond_str}: {', '.join(invalid_props)}. "
+            f"The fluid may be outside its valid state range."
+        )
+    return properties
 
 # Cache statistics for monitoring performance
 _cache_stats = {
@@ -66,11 +143,16 @@ def cached_props_si(prop: str, input1_name: str, input1_val: float,
     try:
         from CoolProp.CoolProp import PropsSI
         result = PropsSI(prop, input1_name, input1_val, input2_name, input2_val, fluid_name)
-        
+
+        # Validate the result for _HUGE, inf, nan values
+        T_K = input1_val if input1_name == 'T' else (input2_val if input2_name == 'T' else None)
+        P_Pa = input1_val if input1_name == 'P' else (input2_val if input2_name == 'P' else None)
+        result = validate_coolprop_result(result, prop, fluid_name, T_K, P_Pa)
+
         # Update statistics
         elapsed_time = time.time() - start_time
         new_cache_info = cached_props_si.cache_info()
-        
+
         if new_cache_info.hits > prev_hits:
             # This was a cache hit
             _cache_stats["hits"] += 1
@@ -78,7 +160,7 @@ def cached_props_si(prop: str, input1_name: str, input1_val: float,
         else:
             # This was a cache miss
             _cache_stats["misses"] += 1
-            
+
         return result
         
     except Exception as e:
@@ -212,16 +294,24 @@ class CachedFluidProperties:
             T_K = T_in_deg_C + 273.15
             P_Pa = P_in_bar * 1e5
 
-            # Get properties using cached PropsSI calls
+            # Get properties using cached PropsSI calls (validation happens in cached_props_si)
             rho = cached_props_si('D', 'T', T_K, 'P', P_Pa, coolprop_name)  # density kg/m³
             eta = cached_props_si('V', 'T', T_K, 'P', P_Pa, coolprop_name)  # viscosity Pa·s
             lambda_ = cached_props_si('L', 'T', T_K, 'P', P_Pa, coolprop_name)  # conductivity W/(m·K)
             Cp = cached_props_si('C', 'T', T_K, 'P', P_Pa, coolprop_name)  # specific heat J/(kg·K)
             MW = cached_props_si('M', 'T', T_K, 'P', P_Pa, coolprop_name) * 1000  # mol weight kg/kmol
 
+            # Additional validation: ensure physically reasonable values
+            if rho <= 0:
+                raise ValueError(f"Invalid density {rho} kg/m³ for {coolprop_name}")
+            if eta <= 0:
+                raise ValueError(f"Invalid viscosity {eta} Pa·s for {coolprop_name}")
+            if Cp <= 0:
+                raise ValueError(f"Invalid specific heat {Cp} J/(kg·K) for {coolprop_name}")
+
             # Derived properties
-            nu = eta / rho if rho > 0 else 1e-6  # kinematic viscosity m²/s
-            alpha = lambda_ / (rho * Cp) if (rho > 0 and Cp > 0) else 1e-7  # thermal diffusivity m²/s
+            nu = eta / rho  # kinematic viscosity m²/s
+            alpha = lambda_ / (rho * Cp) if lambda_ > 0 else 1e-7  # thermal diffusivity m²/s
 
             # Store as lists to match FluidProperties interface
             self.rho = [rho]

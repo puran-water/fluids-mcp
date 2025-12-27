@@ -12,7 +12,7 @@ Model Context Protocol server providing comprehensive fluid mechanics, thermodyn
 
 ## Overview
 
-This MCP server provides 7 consolidated omnitools that encapsulate 17+ specialized calculation methods:
+This MCP server provides 8 consolidated omnitools that encapsulate 17+ specialized calculation methods:
 
 1. **pipe_flow**: Unified liquid and gas pipe flow calculations with pressure drop analysis
 2. **control_valve**: Valve sizing for both liquid and gas service per IEC 60534
@@ -21,6 +21,7 @@ This MCP server provides 7 consolidated omnitools that encapsulate 17+ specializ
 5. **properties**: Thermodynamic and physical property lookup for 120+ fluids and pipe dimensions
 6. **machine_requirements**: Pump, compressor, and hydraulic system design calculations
 7. **orifice_restrictor**: Fixed orifice/restriction plate sizing per ISO 5167
+8. **help_resources**: List available fittings, fluids, materials, and calculation methods
 
 ## Technical Capabilities
 
@@ -190,12 +191,25 @@ Fixed orifice (restriction plate) sizing per ISO 5167 with Reader-Harris-Gallagh
 - Analysis flow: Flow rate at given orifice and pressure drop
 - Plate kit: Table of orifice sizes with corresponding ΔP for commissioning flexibility
 
+#### help_resources
+List available fittings, fluids, materials, and gas calculation methods.
+
+**Parameters:**
+- `resource_type`: "fittings", "fluids", "materials", "methods", or "all"
+- `category`: Optional filter for fittings (e.g., "valves", "elbows_and_bends")
+
+**Returns:**
+- Fittings: Comprehensive list of 60+ fitting types organized by category with aliases
+- Fluids: All 120+ CoolProp fluids with critical properties
+- Materials: Pipe materials with absolute roughness values
+- Methods: Gas flow calculation methods with descriptions and accuracy notes
+
 ## Technical Implementation
 
 ### Architecture
 ```
 fluids-mcp/
-├── server.py                # MCP server with 7 omnitool registrations
+├── server.py                # MCP server with 8 omnitool registrations
 ├── omnitools/              # Consolidated wrapper tools
 │   ├── pipe_flow.py        # Wraps liquid/gas pipe calculations
 │   ├── control_valve.py    # Wraps liquid/gas valve sizing
@@ -203,7 +217,8 @@ fluids-mcp/
 │   ├── parameter_sweep.py  # Wraps all sweep functions
 │   ├── properties.py       # Wraps fluid/pipe properties
 │   ├── machine_requirements.py  # Wraps pump/compressor/hydraulics
-│   └── orifice_restrictor.py    # Fixed orifice sizing per ISO 5167
+│   ├── orifice_restrictor.py    # Fixed orifice sizing per ISO 5167
+│   └── help_resources.py   # Lists available fittings, fluids, materials
 ├── tools/                  # 17+ core calculation engines
 │   ├── pipe_pressure_drop.py       # Liquid pipe calculations
 │   ├── gas_pipe_pressure_drop.py   # Gas pipe with mixtures
@@ -219,10 +234,11 @@ fluids-mcp/
 │   ├── open_channel_flow_new.py    # Channel hydraulics
 │   └── [sweep functions]            # Optimization tools
 ├── utils/                  # Shared utilities
-│   ├── constants.py        # Unit conversions (GPM_to_M3S, PSI_to_PA, etc.)
-│   ├── helpers.py          # Common functions (get_fitting_K)
+│   ├── constants.py        # Unit conversions and default values
+│   ├── helpers.py          # Common functions (get_fitting_K with 60+ fittings)
+│   ├── json_helpers.py     # JSON sanitization for inf/nan handling
 │   ├── import_helpers.py   # Dependency management
-│   ├── property_cache.py   # Performance optimization
+│   ├── property_cache.py   # CoolProp caching with validation
 │   └── fluid_aliases.py    # Name mapping ("natural gas" → "Methane")
 ├── pydraulics/            # Open channel hydraulics engine
 ├── tests/                 # Comprehensive test suite
