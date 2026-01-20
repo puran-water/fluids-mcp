@@ -10,6 +10,9 @@
 
 Model Context Protocol server providing comprehensive fluid mechanics, thermodynamics, and hydraulic calculations for industrial process engineering.
 
+
+> **⚠️ DEVELOPMENT STATUS: This project is under active development and is not yet production-ready. APIs, interfaces, and functionality may change without notice. Use at your own risk for evaluation and testing purposes only. Not recommended for production deployments.**
+
 ## Overview
 
 This MCP server provides 8 consolidated omnitools that encapsulate 17+ specialized calculation methods:
