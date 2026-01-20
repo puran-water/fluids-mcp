@@ -507,15 +507,15 @@ def select_gas_pipe_size_for_dp(
         flow_rate_kg_s = kwargs.get('flow_rate_kg_s')
         if flow_rate_kg_s is None:
             if 'flow_rate_norm_m3_hr' in kwargs:
-                # Normal conditions: 0°C, 1 atm
-                rho_norm = 101325 * MW / (8314.46 * 273.15 * Z)
+                # Normal conditions: 0°C, 1 atm - use Z=1.0 for ideal gas at normal conditions
+                rho_norm = 101325 * MW / (8314.46 * 273.15)  # Z=1 at normal conditions
                 flow_rate_kg_s = kwargs['flow_rate_norm_m3_hr'] * rho_norm / 3600
-                log_messages.append(f"Converted from normal m³/hr: {flow_rate_kg_s:.4f} kg/s")
+                log_messages.append(f"Converted from normal m³/hr: {flow_rate_kg_s:.4f} kg/s (using Z=1 for normal conditions)")
             elif 'flow_rate_std_m3_hr' in kwargs:
-                # Standard conditions: 15°C, 1 atm
-                rho_std = 101325 * MW / (8314.46 * 288.15 * Z)
+                # Standard conditions: 15°C, 1 atm - use Z=1.0 for ideal gas at standard conditions
+                rho_std = 101325 * MW / (8314.46 * 288.15)  # Z=1 at standard conditions
                 flow_rate_kg_s = kwargs['flow_rate_std_m3_hr'] * rho_std / 3600
-                log_messages.append(f"Converted from standard m³/hr: {flow_rate_kg_s:.4f} kg/s")
+                log_messages.append(f"Converted from standard m³/hr: {flow_rate_kg_s:.4f} kg/s (using Z=1 for standard conditions)")
         
         if flow_rate_kg_s is None:
             return json.dumps({"error": "Flow rate must be specified"})

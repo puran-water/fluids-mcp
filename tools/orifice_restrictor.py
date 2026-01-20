@@ -434,9 +434,23 @@ def calculate_orifice_sizing(
         if local_D is None:
             error_log.append("Missing required input: pipe_diameter or nominal_size_in")
 
+        # For gas phase, derive pressure_bar from inlet_pressure if not explicitly set
+        # This ensures correct density calculation at elevated pressures
+        local_pressure_bar = pressure_bar
+        if local_pressure_bar is None:
+            if inlet_pressure is not None:
+                local_pressure_bar = inlet_pressure / 100000.0  # Pa to bar
+                results_log.append(f"Derived pressure_bar={local_pressure_bar:.3f} from inlet_pressure for property lookup")
+            elif inlet_pressure_psi is not None:
+                local_pressure_bar = (inlet_pressure_psi * PSI_to_PA) / 100000.0
+                results_log.append(f"Derived pressure_bar={local_pressure_bar:.3f} from inlet_pressure_psi for property lookup")
+            elif inlet_pressure_bar is not None:
+                local_pressure_bar = inlet_pressure_bar
+                results_log.append(f"Using inlet_pressure_bar={local_pressure_bar:.3f} for property lookup")
+
         # Resolve fluid properties
         local_rho, local_mu, fluid_info = resolve_fluid_properties(
-            fluid_name, temperature_c, pressure_bar,
+            fluid_name, temperature_c, local_pressure_bar,
             fluid_density, fluid_viscosity,
             fluid_density_lbft3, fluid_viscosity_cp,
             results_log, error_log

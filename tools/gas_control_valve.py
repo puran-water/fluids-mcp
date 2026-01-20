@@ -205,8 +205,8 @@ def calculate_gas_control_valve(
                             if comp in fluids.constants.MWs
                         )
                     else:
-                        mw_map = {'CH4': 16040, 'CO2': 44010, 'N2': 28010, 'H2S': 34080, 'O2': 32000, 'H2': 2016}  # kg/kmol
-                        temp_mw = sum(mw_map.get(comp, 28960) * frac for comp, frac in gas_composition_mol.items())
+                        mw_map = {'CH4': 16.04, 'CO2': 44.01, 'N2': 28.01, 'H2S': 34.08, 'O2': 32.00, 'H2': 2.016}  # kg/kmol
+                        temp_mw = sum(mw_map.get(comp, 28.96) * frac for comp, frac in gas_composition_mol.items())
 
                     if temp_mw and temp_mw > 0 and local_gas_mw is None:
                         local_gas_mw = temp_mw

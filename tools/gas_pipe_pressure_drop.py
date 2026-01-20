@@ -715,10 +715,15 @@ def calculate_gas_pipe_pressure_drop(
         # fluids.compressible.isothermal_gas now handles internal iteration for accuracy
 
         # --- Build keyword arguments ---
+        # Note: fluids library Weymouth/Panhandle functions default to Ts=288.7K, Ps=101325 Pa
+        # We pass Ts=T_norm and Ps=P_norm explicitly to match our normal conditions (0°C, 1 atm)
+        # This avoids the ~5.7% systematic error from Ts mismatch (288.7/273.15 = 1.057)
         base_kwargs = {
             'Tavg': local_T_k,
             'Zavg': local_gas_z_factor,
-            'E': 1.0
+            'E': 1.0,
+            'Ts': T_norm,  # Pass standard temperature matching our Q conversion
+            'Ps': P_norm,  # Pass standard pressure matching our Q conversion
         }
         if local_P1 is not None:
             base_kwargs['P1'] = local_P1
@@ -731,13 +736,14 @@ def calculate_gas_pipe_pressure_drop(
         if local_gas_mw is not None and local_gas_mw > 0:
             base_kwargs['SG'] = local_gas_mw / 28.96
 
+        # Calculate density at normal conditions (T_norm, P_norm) with Z=1 (ideal)
+        rho_norm = (P_norm * local_gas_mw) / (R_univ * T_norm) if local_gas_mw and local_gas_mw > 0 else None
+
         Q_norm_m3s = None
-        if local_flow_rate_kg_s is not None and local_gas_mw and local_gas_mw > 0:
+        if local_flow_rate_kg_s is not None and rho_norm and rho_norm > 0:
             try:
-                rho_norm = (P_norm * local_gas_mw) / (R_univ * T_norm)
-                if rho_norm > 0:
-                    Q_norm_m3s = local_flow_rate_kg_s / rho_norm
-                    base_kwargs['Q'] = Q_norm_m3s
+                Q_norm_m3s = local_flow_rate_kg_s / rho_norm
+                base_kwargs['Q'] = Q_norm_m3s
             except Exception as e:
                 error_log.append(f"Could not calculate Q_norm_m3s: {e}")
 
@@ -747,38 +753,38 @@ def calculate_gas_pipe_pressure_drop(
 
         if method == "Weymouth":
             calculation_func = fluids.compressible.Weymouth
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "Panhandle_A":
             calculation_func = fluids.compressible.Panhandle_A
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "Panhandle_B":
             calculation_func = fluids.compressible.Panhandle_B
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "IGT":
             calculation_func = fluids.compressible.IGT
-            required_keys = ['SG', 'Tavg', 'mu', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'mu', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
             specific_kwargs['mu'] = local_gas_viscosity
 
         elif method == "Oliphant":
             calculation_func = fluids.compressible.Oliphant
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "Spitzglass_low":
             calculation_func = fluids.compressible.Spitzglass_low
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "Spitzglass_high":
             calculation_func = fluids.compressible.Spitzglass_high
-            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E']
+            required_keys = ['SG', 'Tavg', 'L', 'D', 'P1', 'P2', 'Q', 'Zavg', 'E', 'Ts', 'Ps']
             specific_kwargs = {k: v for k, v in base_kwargs.items() if k in required_keys}
 
         elif method == "isothermal_darcy":
@@ -879,6 +885,23 @@ def calculate_gas_pipe_pressure_drop(
             return json.dumps({"errors": error_log, "log": results_log})
 
         # --- Populate final_results ---
+        # Handle Q -> mass flow conversion for Weymouth/Panhandle methods
+        # When solving for Q, these methods return volumetric flow at Ts/Ps (normal conditions)
+        # We need to convert back to mass flow using rho_norm
+        final_flow_rate_kg_s = local_flow_rate_kg_s
+        if solve_for == 'Q' and method != 'isothermal_darcy':
+            # solved_variable_value is Q (volumetric at normal conditions, m³/s)
+            # Convert to mass flow: m_kg_s = Q_m3s * rho_norm
+            if rho_norm and rho_norm > 0:
+                final_flow_rate_kg_s = solved_variable_value * rho_norm
+                results_log.append(f"Converted solved Q={solved_variable_value:.6f} m³/s to mass flow={final_flow_rate_kg_s:.4f} kg/s (rho_norm={rho_norm:.3f})")
+            else:
+                error_log.append("Warning: Could not convert Q to mass flow - rho_norm unavailable")
+                final_flow_rate_kg_s = None
+        elif solve_for == 'm':
+            # isothermal_darcy returns mass flow directly
+            final_flow_rate_kg_s = solved_variable_value
+
         final_results = {
             "inputs_resolved": results_log,
             "warnings": error_log if error_log else None,
@@ -891,10 +914,7 @@ def calculate_gas_pipe_pressure_drop(
             "outlet_pressure_pa": local_P2 if solve_for != 'P2' else solved_variable_value,
             "pipe_length_m": local_L if solve_for != 'L' else solved_variable_value,
             "pipe_diameter_m": local_pipe_diameter if solve_for != 'D' else solved_variable_value,
-            "flow_rate_kg_s": (
-                local_flow_rate_kg_s if solve_for not in ['Q', 'm']
-                else solved_variable_value
-            ),
+            "flow_rate_kg_s": final_flow_rate_kg_s,
         }
 
         # Calculate derived results
@@ -987,6 +1007,7 @@ def gas_pipe_sweep(
     inlet_pressure: Optional[float] = None,
     outlet_pressure: Optional[float] = None,
     pipe_length: Optional[float] = None,
+    pipe_length_ft: Optional[float] = None,  # Added: pipe length in feet
     flow_rate_kg_s: Optional[float] = None,
     flow_rate_norm_m3_hr: Optional[float] = None,
     flow_rate_std_m3_hr: Optional[float] = None,
@@ -1028,12 +1049,17 @@ def gas_pipe_sweep(
     # Generate sweep values
     sweep_values = np.linspace(start, stop, n)
     results = []
-    
+
+    # Convert pipe_length_ft to pipe_length if provided
+    local_pipe_length = pipe_length
+    if local_pipe_length is None and pipe_length_ft is not None:
+        local_pipe_length = pipe_length_ft * FT_to_M
+
     # Build base parameters dictionary
     base_kwargs = {
         'inlet_pressure': inlet_pressure,
         'outlet_pressure': outlet_pressure,
-        'pipe_length': pipe_length,
+        'pipe_length': local_pipe_length,
         'flow_rate_kg_s': flow_rate_kg_s,
         'flow_rate_norm_m3_hr': flow_rate_norm_m3_hr,
         'flow_rate_std_m3_hr': flow_rate_std_m3_hr,

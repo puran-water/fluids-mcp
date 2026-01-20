@@ -218,11 +218,17 @@ def calculate_liquid_control_valve(
                 local_Psat = fluid_saturation_pressure_psi * PSI_to_PA
                 results_log.append(f"Converted fluid_saturation_pressure from {fluid_saturation_pressure_psi} psi.")
             else:
-                # Use default only if density/viscosity were successfully obtained
+                # Use water defaults only for water; other fluids get warning about missing Psat
                 if prop_lookup_success:
-                    local_Psat = 3170.0 # Default for water at 25C
-                    results_log.append(f"Using default saturation pressure: {local_Psat} Pa (Water @ 25C).")
-                    error_log.append("Warning: Saturation pressure not provided or looked up; using default.")
+                    is_water = fluid_name is not None and fluid_name.lower() in ['water', 'h2o']
+                    if is_water:
+                        local_Psat = 3170.0  # Default for water at 25C
+                        results_log.append(f"Using default saturation pressure: {local_Psat} Pa (Water @ 25C).")
+                    else:
+                        # For non-water fluids, use a conservative estimate but warn user
+                        local_Psat = 1000.0  # Low conservative estimate
+                        results_log.append(f"Using conservative Psat estimate: {local_Psat} Pa for non-water fluid.")
+                        error_log.append(f"Warning: Saturation pressure unknown for '{fluid_name}'. Cavitation check may be inaccurate. Provide fluid_saturation_pressure for accurate results.")
                 # else: error already logged for density/viscosity
 
         # 3.3 Critical Pressure (if not found via lookup)
@@ -234,10 +240,17 @@ def calculate_liquid_control_valve(
                 local_Pc = fluid_critical_pressure_psi * PSI_to_PA
                 results_log.append(f"Converted fluid_critical_pressure from {fluid_critical_pressure_psi} psi.")
             else:
+                # Use water defaults only for water; other fluids get warning about missing Pc
                 if prop_lookup_success:
-                    local_Pc = 22064000.0 # Default for water
-                    results_log.append(f"Using default critical pressure: {local_Pc} Pa (Water).")
-                    error_log.append("Warning: Critical pressure not provided or looked up; using default.")
+                    is_water = fluid_name is not None and fluid_name.lower() in ['water', 'h2o']
+                    if is_water:
+                        local_Pc = 22064000.0  # Default for water
+                        results_log.append(f"Using default critical pressure: {local_Pc} Pa (Water).")
+                    else:
+                        # For non-water fluids, use a conservative estimate but warn user
+                        local_Pc = 5000000.0  # Conservative estimate (~50 bar)
+                        results_log.append(f"Using conservative Pc estimate: {local_Pc} Pa for non-water fluid.")
+                        error_log.append(f"Warning: Critical pressure unknown for '{fluid_name}'. Cavitation check may be inaccurate. Provide fluid_critical_pressure for accurate results.")
                 # else: error already logged for density/viscosity
 
         # 4. Resolve Valve Factors (FL, Fd)
