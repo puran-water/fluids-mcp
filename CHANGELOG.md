@@ -5,6 +5,14 @@ All notable changes to the Fluids MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.1] - 2025-01-20
+
+### Fixed
+- Gas pipe flow `pipe_length_ft` parameter now correctly forwarded from omnitool
+  - Added `pipe_length_ft` parameter to `calculate_gas_pipe_pressure_drop()` signature
+  - Added ft-to-m conversion logic using `FT_to_M` constant
+  - Previously, `pipe_flow(phase="gas", pipe_length_ft=...)` would fail with "Incorrect number of primary variables" error because `pipe_length_ft` was filtered out by signature inspection
+
 ## [2.2.0] - 2025-12-22
 
 ### Added

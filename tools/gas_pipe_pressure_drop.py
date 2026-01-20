@@ -29,6 +29,7 @@ def calculate_gas_pipe_pressure_drop(
     inlet_pressure: Optional[float] = None,        # Inlet pressure (absolute) in Pa
     outlet_pressure: Optional[float] = None,       # Outlet pressure (absolute) in Pa
     pipe_length: Optional[float] = None,           # Pipe length in m
+    pipe_length_ft: Optional[float] = None,        # Pipe length in feet
     flow_rate_kg_s: Optional[float] = None,        # Mass flow rate in kg/s
     flow_rate_norm_m3_hr: Optional[float] = None,  # Volumetric flow rate at Normal conditions (0°C, 1 atm) in m³/hr
     flow_rate_std_m3_hr: Optional[float] = None,   # Volumetric flow rate at Standard conditions (15°C, 1 atm) in m³/hr,
@@ -609,7 +610,13 @@ def calculate_gas_pipe_pressure_drop(
         # 5. Pressures and Length
         local_P1 = inlet_pressure
         local_P2 = outlet_pressure
-        local_L = pipe_length
+        if pipe_length is not None:
+            local_L = pipe_length
+        elif pipe_length_ft is not None:
+            local_L = pipe_length_ft * FT_to_M
+            results_log.append(f"Converted pipe_length from {pipe_length_ft} ft.")
+        else:
+            local_L = None
         if local_P1 is not None:
             results_log.append(f"Using P1 = {local_P1:.2f} Pa")
         if local_P2 is not None:
