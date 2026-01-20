@@ -6,7 +6,7 @@
 [![Fluids](https://img.shields.io/badge/Fluids-1.0.26-green)](https://github.com/CalebBell/fluids)
 [![Thermo](https://img.shields.io/badge/Thermo-0.3.0-green)](https://github.com/CalebBell/thermo)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
-[![Status](https://img.shields.io/badge/Status-Production-success)](https://github.com/puran-water/fluids-mcp)
+[![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/puran-water/fluids-mcp)
 
 Model Context Protocol server providing comprehensive fluid mechanics, thermodynamics, and hydraulic calculations for industrial process engineering.
 
