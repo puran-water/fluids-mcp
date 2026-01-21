@@ -180,4 +180,5 @@ custom_fluids/
 *push*.bat
 *push*.md
 fix_*.bat
-debug_*.py
+debug_*.py*.pyc
+.venv/
