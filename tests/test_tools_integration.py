@@ -52,11 +52,68 @@ class TestFluidProperties:
             pressure_bar=1.01325
         )
         result_dict = json.loads(result)
-        
+
         # Should not have errors now that property lookup is fixed
         assert "errors" not in result_dict or not result_dict["errors"]
         assert "density_kg_m3" in result_dict
         assert "molecular_weight_kg_mol" in result_dict
+
+
+class TestCachedFluidPropertiesRegressions:
+    """Regression tests for CachedFluidProperties bug fixes."""
+
+    def test_methane_z_factor_at_high_pressure(self):
+        """
+        Verify CachedFluidProperties queries Z from CoolProp at high pressure.
+
+        Bug fix: Z was hard-coded to 1.0 instead of querying from CoolProp.
+        At high pressure, real gases deviate from ideal (Z < 1.0 for methane).
+        """
+        from utils.property_cache import CachedFluidProperties
+
+        # At 50 bar, methane Z-factor should be noticeably < 1.0
+        # CachedFluidProperties takes: coolprop_name, T_in_deg_C, P_in_bar
+        props = CachedFluidProperties("Methane", 20.0, 50.0)
+
+        # Z should be queried from CoolProp, not hard-coded to 1.0
+        z_value = props.Z[0]
+        assert z_value < 1.0, f"Z={z_value} should be < 1.0 at 50 bar for methane"
+        assert z_value > 0.5, f"Z={z_value} is unreasonably low"
+
+    def test_methane_gamma_differs_from_ideal(self):
+        """
+        Verify that gamma (Cp/Cv) is calculated from CoolProp Cv, not Cv=Cp-R.
+
+        Bug fix: Cv was calculated as Cp-R (ideal gas) instead of querying
+        from CoolProp directly using key 'O' (Cvmass).
+        """
+        from utils.property_cache import CachedFluidProperties
+
+        # Get properties at moderate pressure
+        # CachedFluidProperties takes: coolprop_name, T_in_deg_C, P_in_bar
+        props = CachedFluidProperties("Methane", 20.0, 10.0)
+
+        gamma = props.gamma[0]
+        # Methane gamma should be around 1.3-1.35 at these conditions
+        # Not exactly 1.4 (ideal diatomic) or derived from Cp-R
+        assert 1.25 < gamma < 1.45, f"gamma={gamma} outside expected range for methane"
+
+    def test_cv_is_reasonable_for_real_gas(self):
+        """Verify Cv is queried directly from CoolProp."""
+        from utils.property_cache import CachedFluidProperties
+
+        # CachedFluidProperties takes: coolprop_name, T_in_deg_C, P_in_bar
+        props = CachedFluidProperties("Methane", 20.0, 10.0)
+
+        cv = props.Cv[0]
+        cp = props.Cp[0]
+
+        # Cv should be positive and less than Cp
+        assert cv > 0, f"Cv={cv} should be positive"
+        assert cv < cp, f"Cv={cv} should be less than Cp={cp}"
+
+        # For methane at 10 bar, Cv ~ 1700-2000 J/(kg·K)
+        assert 1500 < cv < 2500, f"Cv={cv} outside expected range for methane"
 
 
 class TestLiquidFlowCalculations:

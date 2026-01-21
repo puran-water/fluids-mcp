@@ -405,6 +405,119 @@ class TestISO5167Validity:
         )
         assert any("12.5" in w for w in warnings)
 
+    def test_gas_pressure_ratio_warning(self):
+        """Test warning for gas when P2/P1 < 0.80 (ISO 5167 expansibility limit)."""
+        # P2/P1 = 0.75 should trigger warning
+        P1 = 1000000  # 10 bar
+        P2 = 750000   # 7.5 bar (ratio = 0.75)
+        warnings = check_iso5167_validity(
+            D=0.1,
+            D2=0.05,
+            dP=P1 - P2,
+            P1=P1,
+            P2=P2,
+            phase="gas"
+        )
+        assert any("0.80" in w or "pressure ratio" in w.lower() for w in warnings), \
+            f"Expected gas pressure ratio warning, got: {warnings}"
+
+    def test_gas_pressure_ratio_no_warning_when_valid(self):
+        """Test no warning when P2/P1 >= 0.80 for gas."""
+        # P2/P1 = 0.85 should NOT trigger warning
+        P1 = 1000000  # 10 bar
+        P2 = 850000   # 8.5 bar (ratio = 0.85)
+        warnings = check_iso5167_validity(
+            D=0.1,
+            D2=0.05,
+            dP=P1 - P2,
+            P1=P1,
+            P2=P2,
+            phase="gas"
+        )
+        assert not any("pressure ratio" in w.lower() for w in warnings), \
+            f"Unexpected pressure ratio warning: {warnings}"
+
+    def test_liquid_no_pressure_ratio_warning(self):
+        """Test that liquid phase doesn't get gas expansibility warnings."""
+        P1 = 1000000
+        P2 = 500000  # Would be 0.50 ratio
+        warnings = check_iso5167_validity(
+            D=0.1,
+            D2=0.05,
+            dP=P1 - P2,
+            P1=P1,
+            P2=P2,
+            phase="liquid"  # Liquid - no expansibility check
+        )
+        assert not any("pressure ratio" in w.lower() or "0.80" in w for w in warnings), \
+            f"Liquid should not get gas expansibility warning: {warnings}"
+
+
+class TestGasOrificeRegressions:
+    """Regression tests for gas orifice calculations (bug fixes)."""
+
+    def test_gas_analysis_dp_uses_inlet_pressure_for_density(self):
+        """
+        Verify that gas orifice analysis_dp derives pressure_bar from inlet_pressure.
+
+        Bug fix: analysis_dp was using default 1 bar for density lookup instead of
+        deriving from inlet_pressure, causing ~10x density errors at elevated pressures.
+        """
+        # Test using fluid_name to trigger the pressure derivation code path
+        # When fluid_name is provided, the code should derive pressure_bar from inlet_pressure
+        result = json.loads(calculate_orifice_analysis_dp(
+            flow_rate_m3_hr=10.0,
+            orifice_diameter_mm=20,
+            nominal_size_in=2,
+            inlet_pressure=1000000,  # 10 bar absolute (Pa)
+            fluid_name="Methane",
+            temperature_c=20,
+            gas_gamma=1.3,
+            phase="gas"
+        ))
+
+        # Verify calculation succeeded
+        assert "error" not in result, f"Calculation failed: {result}"
+        assert "pressure_drop_bar" in result
+
+        # KEY ASSERTION: Check that the log mentions deriving pressure from inlet_pressure
+        # This proves the fix is working - before the fix, it would use default 1 bar
+        log = result.get("inputs_resolved", [])
+        log_text = " ".join(str(item) for item in log)
+
+        # The fix adds a log message like "Derived pressure_bar=10.000 from inlet_pressure"
+        assert any("pressure_bar" in str(item) and "inlet_pressure" in str(item)
+                   for item in log), \
+            f"Expected log to show pressure_bar derived from inlet_pressure, got: {log}"
+
+    def test_gas_analysis_flow_uses_inlet_pressure_for_density(self):
+        """
+        Verify that gas orifice analysis_flow derives pressure_bar from inlet_pressure.
+
+        Bug fix: analysis_flow was using default 1 bar for density lookup instead of
+        deriving from inlet_pressure, causing ~10x density errors at elevated pressures.
+        """
+        result = json.loads(calculate_orifice_analysis_flow(
+            orifice_diameter_mm=20,
+            nominal_size_in=2,
+            inlet_pressure=1000000,  # 10 bar absolute (Pa)
+            pressure_drop_bar=0.5,
+            fluid_name="Methane",
+            temperature_c=20,
+            gas_gamma=1.3,
+            phase="gas"
+        ))
+
+        # Verify calculation succeeded
+        assert "error" not in result, f"Calculation failed: {result}"
+        assert "flow_rate_m3_hr" in result
+
+        # KEY ASSERTION: Check that the log mentions deriving pressure from inlet_pressure
+        log = result.get("inputs_resolved", [])
+        assert any("pressure_bar" in str(item) and "inlet_pressure" in str(item)
+                   for item in log), \
+            f"Expected log to show pressure_bar derived from inlet_pressure, got: {log}"
+
 
 class TestManualCalculationValidation:
     """

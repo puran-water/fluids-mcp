@@ -322,12 +322,37 @@ class CachedFluidProperties:
             self.nu = [nu]
             self.alpha = [alpha]
 
-            # Derived properties for gas calculations
-            R_specific = 8314.46 / MW if MW > 0 else 287.0  # J/(kg·K)
-            Cv = Cp - R_specific  # Cv = Cp - R for ideal gas approximation
+            # Query real gas properties from CoolProp instead of ideal gas approximations
+            # Z (compressibility factor) - CoolProp key 'Z'
+            # Cv (specific heat at constant volume) - CoolProp key 'O' or 'Cvmass'
+            try:
+                Z = cached_props_si('Z', 'T', T_K, 'P', P_Pa, coolprop_name)
+                if Z <= 0 or Z > 2.0:  # Sanity check
+                    Z = 1.0
+                    logger.debug("Z-factor out of range for %s, using ideal gas Z=1.0", coolprop_name)
+            except Exception as z_err:
+                Z = 1.0
+                logger.debug("Could not query Z for %s: %s, using ideal gas Z=1.0", coolprop_name, z_err)
+
+            try:
+                Cv = cached_props_si('O', 'T', T_K, 'P', P_Pa, coolprop_name)  # 'O' = Cvmass
+                if Cv <= 0:
+                    # Fallback to ideal gas: Cv = Cp - R
+                    R_specific = 8314.46 / MW if MW > 0 else 287.0
+                    Cv = Cp - R_specific
+                    logger.debug("Cv invalid for %s, using ideal gas Cv=Cp-R", coolprop_name)
+            except Exception as cv_err:
+                # Fallback to ideal gas: Cv = Cp - R
+                R_specific = 8314.46 / MW if MW > 0 else 287.0
+                Cv = Cp - R_specific
+                logger.debug("Could not query Cv for %s: %s, using ideal gas Cv=Cp-R", coolprop_name, cv_err)
+
+            # Calculate gamma from actual Cp and Cv values
+            gamma = Cp / Cv if Cv > 0 else 1.4
+
             self.Cv = [Cv]
-            self.gamma = [Cp / Cv] if Cv > 0 else [1.4]
-            self.Z = [1.0]  # Compressibility factor (approximation)
+            self.gamma = [gamma]
+            self.Z = [Z]
 
         except Exception as e:
             logger.error("Failed to get CoolProp properties for %s: %s", coolprop_name, e)

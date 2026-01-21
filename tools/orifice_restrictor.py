@@ -43,7 +43,8 @@ MM_TO_M = 0.001
 
 
 def check_iso5167_validity(D: float, D2: float, dP: float, Re_D: Optional[float] = None,
-                           taps: str = 'D') -> List[str]:
+                           taps: str = 'D', P1: Optional[float] = None,
+                           P2: Optional[float] = None, phase: str = "liquid") -> List[str]:
     """
     Check ISO 5167 validity limits and return warnings.
 
@@ -53,6 +54,9 @@ def check_iso5167_validity(D: float, D2: float, dP: float, Re_D: Optional[float]
         dP: Pressure drop in Pa
         Re_D: Reynolds number based on pipe diameter (optional)
         taps: Tap configuration ('D', 'flange', 'corner')
+        P1: Inlet pressure in Pa (optional, for gas expansibility check)
+        P2: Outlet pressure in Pa (optional, for gas expansibility check)
+        phase: 'liquid' or 'gas' (for gas expansibility check)
 
     Returns:
         List of warning strings for any limit violations
@@ -92,6 +96,17 @@ def check_iso5167_validity(D: float, D2: float, dP: float, Re_D: Optional[float]
             min_Re = max(5000, 170000 * beta**2 * D)
             if Re_D < min_Re:
                 warnings.append(f"Re_D={Re_D:.0f} below minimum {min_Re:.0f} for flange taps")
+
+    # Gas expansibility validity check (ISO 5167 orifice_expansibility)
+    # The ISO 5167 expansibility formula was determined for P2/P1 >= 0.80
+    if phase == "gas" and P1 is not None and P2 is not None and P1 > 0:
+        pressure_ratio = P2 / P1
+        if pressure_ratio < 0.80:
+            warnings.append(
+                f"Pressure ratio P2/P1={pressure_ratio:.3f} is below 0.80. "
+                f"ISO 5167 expansibility correlation may be inaccurate. "
+                f"Consider using a different method for high pressure drops."
+            )
 
     return warnings
 
@@ -552,8 +567,11 @@ def calculate_orifice_sizing(
         Re_D = local_rho * (local_Q / (math.pi * local_D**2 / 4)) * local_D / local_mu
         Re_orifice = local_rho * V_orifice * D2 / local_mu
 
-        # Check ISO 5167 validity
-        validity_warnings = check_iso5167_validity(local_D, D2, local_dP, Re_D, taps)
+        # Check ISO 5167 validity (including gas expansibility check)
+        validity_warnings = check_iso5167_validity(
+            local_D, D2, local_dP, Re_D, taps,
+            P1=local_P1, P2=local_P2, phase=phase
+        )
         if validity_warnings:
             error_log.extend(validity_warnings)
 
@@ -679,8 +697,22 @@ def calculate_orifice_analysis_dp(
         if local_D is None:
             error_log.append("Missing required input: pipe_diameter or nominal_size_in")
 
+        # For gas phase, derive pressure_bar from inlet_pressure if not explicitly set
+        # This ensures correct density calculation at elevated pressures
+        local_pressure_bar = pressure_bar
+        if phase == "gas" and local_pressure_bar is None:
+            if inlet_pressure is not None:
+                local_pressure_bar = inlet_pressure / 100000.0  # Pa to bar
+                results_log.append(f"Derived pressure_bar={local_pressure_bar:.3f} from inlet_pressure for property lookup")
+            elif inlet_pressure_psi is not None:
+                local_pressure_bar = (inlet_pressure_psi * PSI_to_PA) / 100000.0
+                results_log.append(f"Derived pressure_bar={local_pressure_bar:.3f} from inlet_pressure_psi for property lookup")
+            elif inlet_pressure_bar is not None:
+                local_pressure_bar = inlet_pressure_bar
+                results_log.append(f"Using inlet_pressure_bar={local_pressure_bar:.3f} for property lookup")
+
         local_rho, local_mu, fluid_info = resolve_fluid_properties(
-            fluid_name, temperature_c, pressure_bar,
+            fluid_name, temperature_c, local_pressure_bar,
             fluid_density, fluid_viscosity,
             fluid_density_lbft3, fluid_viscosity_cp,
             results_log, error_log
@@ -759,8 +791,11 @@ def calculate_orifice_analysis_dp(
         V_orifice = local_Q / A_orifice
         Re_D = local_rho * (local_Q / (math.pi * local_D**2 / 4)) * local_D / local_mu
 
-        # Check validity
-        validity_warnings = check_iso5167_validity(local_D, local_D2, local_dP, Re_D, taps)
+        # Check validity (including gas expansibility check)
+        validity_warnings = check_iso5167_validity(
+            local_D, local_D2, local_dP, Re_D, taps,
+            P1=local_P1, P2=local_P2, phase=phase
+        )
         if validity_warnings:
             error_log.extend(validity_warnings)
 
@@ -876,19 +911,7 @@ def calculate_orifice_analysis_flow(
         if local_D is None:
             error_log.append("Missing required input: pipe_diameter")
 
-        local_rho, local_mu, fluid_info = resolve_fluid_properties(
-            fluid_name, temperature_c, pressure_bar,
-            fluid_density, fluid_viscosity,
-            fluid_density_lbft3, fluid_viscosity_cp,
-            results_log, error_log
-        )
-
-        if local_rho is None:
-            error_log.append("Missing required input: fluid_density")
-        if local_mu is None:
-            error_log.append("Missing required input: fluid_viscosity")
-
-        # Resolve inlet pressure
+        # Resolve inlet pressure first (needed for gas property lookup)
         local_P1 = None
         if inlet_pressure is not None:
             local_P1 = inlet_pressure
@@ -903,6 +926,25 @@ def calculate_orifice_analysis_flow(
 
         if local_P1 is None and phase == "gas":
             error_log.append("Missing required input for gas: inlet_pressure")
+
+        # For gas phase, derive pressure_bar from inlet_pressure if not explicitly set
+        # This ensures correct density calculation at elevated pressures
+        local_pressure_bar = pressure_bar
+        if phase == "gas" and local_pressure_bar is None and local_P1 is not None:
+            local_pressure_bar = local_P1 / 100000.0  # Pa to bar
+            results_log.append(f"Derived pressure_bar={local_pressure_bar:.3f} from inlet_pressure for property lookup")
+
+        local_rho, local_mu, fluid_info = resolve_fluid_properties(
+            fluid_name, temperature_c, local_pressure_bar,
+            fluid_density, fluid_viscosity,
+            fluid_density_lbft3, fluid_viscosity_cp,
+            results_log, error_log
+        )
+
+        if local_rho is None:
+            error_log.append("Missing required input: fluid_density")
+        if local_mu is None:
+            error_log.append("Missing required input: fluid_viscosity")
 
         if error_log:
             return json.dumps({"errors": error_log, "log": results_log})
@@ -946,8 +988,11 @@ def calculate_orifice_analysis_flow(
         V_orifice = local_Q / A_orifice
         Re_D = local_rho * (local_Q / (math.pi * local_D**2 / 4)) * local_D / local_mu
 
-        # Check validity
-        validity_warnings = check_iso5167_validity(local_D, local_D2, local_dP, Re_D, taps)
+        # Check validity (including gas expansibility check)
+        validity_warnings = check_iso5167_validity(
+            local_D, local_D2, local_dP, Re_D, taps,
+            P1=local_P1, P2=local_P2, phase=phase
+        )
         if validity_warnings:
             error_log.extend(validity_warnings)
 
@@ -1127,6 +1172,15 @@ def generate_plate_kit(
         except Exception as e:
             error_log.append(f"Failed to size design orifice: {e}")
             return json.dumps({"errors": error_log, "log": results_log})
+
+        # Check ISO 5167 validity for design point (including gas expansibility check)
+        design_Re_D = local_rho * (local_Q / (math.pi * local_D**2 / 4)) * local_D / local_mu
+        validity_warnings = check_iso5167_validity(
+            local_D, design_D2, local_dP, design_Re_D, taps,
+            P1=local_P1, P2=local_P2, phase=phase
+        )
+        if validity_warnings:
+            error_log.extend(validity_warnings)
 
         # Step 2: Generate plate diameters
         variability_fraction = diameter_variability_percent / 100.0

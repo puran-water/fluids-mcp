@@ -5,6 +5,30 @@ All notable changes to the Fluids MCP Server will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2025-01-21
+
+### Fixed
+- **Critical**: Gas orifice analysis functions now correctly derive pressure for property lookup
+  - `calculate_orifice_analysis_dp` and `calculate_orifice_analysis_flow` now derive `pressure_bar` from `inlet_pressure` for gas phase
+  - Previously used default 1 bar, causing ~10x density errors at elevated pressures
+- **High**: `CachedFluidProperties` now queries real gas properties from CoolProp
+  - Z-factor queried via `PropsSI('Z', ...)` instead of hard-coded 1.0
+  - Cv queried via `PropsSI('O', ...)` instead of ideal gas approximation (Cp - R)
+  - Gamma now calculated from actual Cp/Cv values for real gas accuracy
+- **High**: ISO 5167 gas expansibility validity check added to all orifice modes
+  - Warning issued when P2/P1 < 0.80 (outside ISO 5167 correlation validity)
+  - Applied to sizing, analysis_dp, analysis_flow, and plate_kit modes
+- **Medium**: `isothermal_darcy` method documentation corrected
+  - Fixed misleading comments about "internal iteration" - upstream does NOT iterate
+  - Added warning when ΔP/P1 > 20% (reduced accuracy per upstream docs)
+  - Fixed warning propagation bug ensuring late warnings are included in results
+
+### Added
+- 8 regression tests for bug fixes with proper assertions:
+  - Gas pressure ratio warnings (P2/P1 < 0.80)
+  - Gas orifice pressure derivation verification
+  - CachedFluidProperties Z-factor and gamma validation
+
 ## [2.2.1] - 2025-01-20
 
 ### Fixed

@@ -711,8 +711,10 @@ def calculate_gas_pipe_pressure_drop(
             return json.dumps({"errors": error_log, "log": results_log})
 
         # --- Calculate derived values needed by some methods ---
-        # NOTE: Removed problematic averaging approach for isothermal_darcy per expert reviewer
-        # fluids.compressible.isothermal_gas now handles internal iteration for accuracy
+        # NOTE: The fluids library's isothermal_gas function does NOT perform internal
+        # iteration. Per upstream documentation: "iteration must be used to correct this".
+        # For high pressure drops (ΔP/P1 > 20%), results may have reduced accuracy.
+        # A warning will be issued in such cases.
 
         # --- Build keyword arguments ---
         # Note: fluids library Weymouth/Panhandle functions default to Ts=288.7K, Ps=101325 Pa
@@ -789,10 +791,10 @@ def calculate_gas_pipe_pressure_drop(
 
         elif method == "isothermal_darcy":
             calculation_func = fluids.compressible.isothermal_gas
-            results_log.append("Using isothermal_darcy with internal iteration for improved accuracy")
-            
+            results_log.append("Using isothermal_darcy (single-pass calculation, no internal iteration)")
+
             # Calculate initial density and friction factor for fluids function
-            # The function will handle internal iteration properly
+            # Note: isothermal_gas does NOT perform internal iteration per upstream docs
             if local_P1 and local_P2:
                 avg_P = (local_P1 + local_P2) / 2.0
             elif local_P1:
@@ -816,7 +818,8 @@ def calculate_gas_pipe_pressure_drop(
                     Re=Re_initial, eD=local_pipe_roughness / local_pipe_diameter
                 )
             else:
-                # Use default friction factor if flow rate unknown (will be iterated internally)
+                # Use default friction factor if flow rate unknown
+                # Note: isothermal_gas does NOT iterate internally per upstream docs
                 initial_fd = 0.02  # Reasonable default for commercial pipe
                 
             # Prepare arguments for isothermal_gas function
@@ -926,6 +929,17 @@ def calculate_gas_pipe_pressure_drop(
             final_results["pressure_drop_pa"] = final_P1 - final_P2
             final_results["pressure_drop_psi"] = (final_P1 - final_P2) / PSI_to_PA
 
+            # Warn about isothermal_darcy accuracy for large pressure drops
+            # Per upstream docs: "iteration must be used to correct this"
+            if method == "isothermal_darcy" and final_P1 > 0:
+                pressure_drop_ratio = (final_P1 - final_P2) / final_P1
+                if pressure_drop_ratio > 0.20:
+                    error_log.append(
+                        f"Warning: isothermal_darcy method with ΔP/P1={pressure_drop_ratio:.1%} may have "
+                        f"reduced accuracy. Per upstream fluids library: 'iteration must be used to "
+                        f"correct this'. Consider using Weymouth or Panhandle methods for large pressure drops."
+                    )
+
         if final_Q_kgs is not None and local_gas_mw is not None:
             try:
                 rho_norm = (P_norm * local_gas_mw) / (R_univ * T_norm)
@@ -980,7 +994,12 @@ def calculate_gas_pipe_pressure_drop(
             final_results["L_equivalent_m"] = L_equivalent
             final_results["L_pipe_m"] = pipe_length  # Original pipe length
             final_results["L_effective_m"] = local_L  # Effective length with fittings
-        
+
+        # Update warnings with any that were added after initial construction
+        # (e.g., isothermal_darcy high pressure drop warning)
+        if error_log:
+            final_results["warnings"] = error_log
+
         # Remove null keys before returning
         if not final_results.get("warnings"):
             final_results.pop("warnings", None)
