@@ -18,7 +18,6 @@ from utils.constants import (
     LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS
 )
 from utils.helpers import get_fitting_K
-from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.pipe_pressure_drop")
@@ -389,33 +388,24 @@ def calculate_pipe_pressure_drop(
              local_fluid_density = fluid_density_lbft3 * LBFT3_to_KGM3
              local_fluid_viscosity = fluid_viscosity_cp * CENTIPOISE_to_PAS
              results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
-        elif fluid_name is not None and temperature_c is not None and FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
-            # Internal lookup using fluidprop or similar
+        elif fluid_name is not None and temperature_c is not None:
             try:
-                try:
-                    valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
-                except (TypeError, IndexError):
-                    valid_fluids = []
-                actual_fluid_name = fluid_name
-
-                if not valid_fluids or fluid_name not in valid_fluids:
-                    # Try case-insensitive match
-                    fluid_lower = fluid_name.lower()
-                    match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)
-                    if match:
-                        actual_fluid_name = match
-                    else:
-                        raise ValueError(f"Fluid '{fluid_name}' not found.")
-                
-                p_bar = pressure_bar if pressure_bar is not None else 1.01325 # Default pressure if not given
-                fluid_props = FluidProperties(coolprop_name=actual_fluid_name, T_in_deg_C=temperature_c, P_in_bar=p_bar)
-                local_fluid_density = float(fluid_props.rho[0])
-                local_fluid_viscosity = float(fluid_props.eta[0])
-                results_log.append(f"Looked up properties for {actual_fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                from utils.resolve_properties import resolve_liquid_properties
+                p_bar = pressure_bar if pressure_bar is not None else 1.01325
+                props = resolve_liquid_properties(fluid_name, temperature_c, p_bar)
+                if props is not None:
+                    local_fluid_density = props.density
+                    local_fluid_viscosity = props.viscosity
+                    results_log.append(f"Properties via {props.source} for {fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                    results_log.extend(props.log)
+                else:
+                    error_log.append(f"Failed to look up fluid properties for {fluid_name} at {temperature_c}°C: all backends failed")
+                    local_fluid_density = None
+                    local_fluid_viscosity = None
             except Exception as fluid_lookup_e:
                 error_log.append(f"Failed to look up fluid properties for {fluid_name} at {temperature_c}°C: {fluid_lookup_e}")
-                local_fluid_density = None  # Explicitly set to None on failure
-                local_fluid_viscosity = None # Explicitly set to None on failure        
+                local_fluid_density = None
+                local_fluid_viscosity = None
         else:
             error_log.append("Missing required inputs for fluid properties: (fluid_density AND fluid_viscosity) OR (fluid_density_lbft3 AND fluid_viscosity_cp) OR (fluid_name AND temperature_c).")
 

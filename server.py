@@ -43,16 +43,17 @@ mcp.tool()(help_resources)
 # Log information about available dependencies
 from utils.import_helpers import FLUIDPROP_AVAILABLE, COOLPROP_AVAILABLE
 
-if __name__ == "__main__":
+def main():
+    """Entry point for the fluids-mcp CLI."""
     logger.info("Starting Fluids MCP server...")
     logger.info("FluidProp available: %s", FLUIDPROP_AVAILABLE)
     logger.info("CoolProp available: %s", COOLPROP_AVAILABLE)
-    
+
     if COOLPROP_AVAILABLE:
         from utils.import_helpers import get_coolprop_fluids_list
         fluids = get_coolprop_fluids_list()
         logger.info("CoolProp fluids count: %d", len(fluids))
-    
+
     # Log which omnitools are registered
     logger.info("Registered omnitools (consolidated from 17 tools):")
     logger.info("  - pipe_flow: Unified liquid/gas pipe pressure drop calculations")
@@ -63,6 +64,10 @@ if __name__ == "__main__":
     logger.info("  - machine_requirements: Unified pump/compressor/hydraulic calculations")
     logger.info("  - orifice_restrictor: Fixed orifice/restriction plate sizing")
     logger.info("  - help_resources: List available fittings, fluids, materials, and methods")
-    
+
     # Start the server
     mcp.run()
+
+
+if __name__ == "__main__":
+    main()

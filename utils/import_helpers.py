@@ -21,7 +21,7 @@ try:
     FluidProperties = _FluidProperties
     logger.info("FluidProperties package successfully imported")
 except ImportError:
-    logger.warning("fluidprop module not available. Fluid property lookups will be disabled.")
+    logger.info("fluidprop module not available. CoolProp will be used as primary property backend.")
 
 # CoolProp availability check
 COOLPROP_AVAILABLE = False
@@ -52,81 +52,3 @@ def get_coolprop_fluids_list():
         logger.error("Error getting fluid list from CoolProp: %s", e)
         return []
 
-def get_fluid_properties(fluid_name, temperature_c, pressure_bar=1.01325):
-    """Attempt to get fluid properties with graceful fallback to defaults.
-    
-    Args:
-        fluid_name: Name of fluid
-        temperature_c: Temperature in Celsius
-        pressure_bar: Pressure in bar
-        
-    Returns:
-        Dictionary of fluid properties or None if lookup failed
-    """
-    if not FLUIDPROP_AVAILABLE:
-        logger.warning("Cannot lookup fluid properties: fluidprop package not available")
-        return None
-        
-    try:
-        # Use cached version for better performance
-        from .property_cache import CachedFluidProperties
-        fluid_props = CachedFluidProperties(
-            coolprop_name=fluid_name,
-            T_in_deg_C=temperature_c,
-            P_in_bar=pressure_bar
-        )
-        
-        return {
-            "name": fluid_name,
-            "temperature_c": temperature_c,
-            "pressure_bar": pressure_bar,
-            "density_kgm3": float(fluid_props.rho[0]),
-            "viscosity_pas": float(fluid_props.eta[0]),
-            "kinematic_viscosity_m2s": float(fluid_props.nu[0])
-        }
-    except Exception as e:
-        logger.error("Error getting fluid properties for %s: %s", fluid_name, e)
-        return None
-
-def get_saturation_pressure(fluid_name, temperature_c):
-    """Attempt to get saturation pressure with graceful fallback.
-    
-    Args:
-        fluid_name: Name of fluid
-        temperature_c: Temperature in Celsius
-        
-    Returns:
-        Saturation pressure in Pa or None if lookup failed
-    """
-    if not COOLPROP_AVAILABLE:
-        logger.warning("Cannot lookup saturation pressure: CoolProp package not available")
-        return None
-        
-    try:
-        # Use cached version for better performance
-        from .property_cache import cached_saturation_pressure
-        return cached_saturation_pressure(fluid_name, temperature_c)
-    except Exception as e:
-        logger.error("Error getting saturation pressure for %s: %s", fluid_name, e)
-        return None
-
-def get_critical_pressure(fluid_name):
-    """Attempt to get critical pressure with graceful fallback.
-    
-    Args:
-        fluid_name: Name of fluid
-        
-    Returns:
-        Critical pressure in Pa or None if lookup failed
-    """
-    if not COOLPROP_AVAILABLE:
-        logger.warning("Cannot lookup critical pressure: CoolProp package not available")
-        return None
-        
-    try:
-        # Use cached version for better performance
-        from .property_cache import cached_critical_pressure
-        return cached_critical_pressure(fluid_name)
-    except Exception as e:
-        logger.error("Error getting critical pressure for %s: %s", fluid_name, e)
-        return None

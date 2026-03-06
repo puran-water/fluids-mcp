@@ -18,10 +18,7 @@ import fluids
 import fluids.piping
 from fluids.flow_meter import (
     differential_pressure_meter_solver,
-    flow_meter_discharge,
     ISO_5167_ORIFICE,
-    C_Reader_Harris_Gallagher,
-    orifice_expansibility,
 )
 
 # Import shared utilities
@@ -30,9 +27,6 @@ from utils.constants import (
     LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEG_C_to_K,
     DEFAULT_ATMOSPHERIC_PRESSURE
 )
-from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, COOLPROP_AVAILABLE, CP
-from utils.fluid_aliases import map_fluid_name
-
 # Configure logging
 logger = logging.getLogger("fluids-mcp.orifice_restrictor")
 
@@ -155,37 +149,30 @@ def resolve_fluid_properties(
         local_viscosity = fluid_viscosity_cp * CENTIPOISE_to_PAS
         results_log.append(f"Converted viscosity from {fluid_viscosity_cp} cP.")
 
-    # Priority 3: Property lookup via FluidProp
+    # Priority 3: Property lookup via centralized resolver (CoolProp → fluidprop)
     if (local_density is None or local_viscosity is None) and fluid_name is not None and temperature_c is not None:
-        if FLUIDPROP_AVAILABLE and FluidProperties is not None:
-            try:
-                mapped_name = map_fluid_name(fluid_name)
-                p_bar = pressure_bar if pressure_bar is not None else 1.01325
-
-                fluid_props = FluidProperties(
-                    coolprop_name=mapped_name,
-                    T_in_deg_C=temperature_c,
-                    P_in_bar=p_bar
-                )
-
+        try:
+            from utils.resolve_properties import resolve_liquid_properties
+            p_bar = pressure_bar if pressure_bar is not None else 1.01325
+            props = resolve_liquid_properties(fluid_name, temperature_c, p_bar)
+            if props is not None:
                 if local_density is None:
-                    local_density = float(fluid_props.rho[0])
+                    local_density = props.density
                 if local_viscosity is None:
-                    local_viscosity = float(fluid_props.eta[0])
-
+                    local_viscosity = props.viscosity
                 fluid_info = {
-                    "name_used": mapped_name,
+                    "name_used": fluid_name,
                     "temperature_c": temperature_c,
                     "pressure_bar": p_bar,
                     "density_kg_m3": local_density,
                     "viscosity_pa_s": local_viscosity
                 }
-                results_log.append(f"Looked up properties for {mapped_name} at {temperature_c}°C, {p_bar} bar.")
-
-            except Exception as e:
-                error_log.append(f"Fluid property lookup failed: {e}")
-        else:
-            error_log.append("Fluid property lookup unavailable (FluidProp not installed).")
+                results_log.append(f"Properties via {props.source} for {fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                results_log.extend(props.log)
+            else:
+                error_log.append(f"Fluid property lookup failed for {fluid_name}: all backends failed")
+        except Exception as e:
+            error_log.append(f"Fluid property lookup failed: {e}")
 
     return local_density, local_viscosity, fluid_info
 

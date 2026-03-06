@@ -7,7 +7,7 @@ handling special float values (inf, nan) that are not valid in JSON per RFC 7159
 
 import math
 import json
-from typing import Any, Dict, List, Union
+from typing import Any
 
 
 def sanitize_for_json(obj: Any) -> Any:
@@ -76,27 +76,6 @@ def sanitize_for_json(obj: Any) -> Any:
     return str(obj)
 
 
-def safe_json_dumps(obj: Any, **kwargs) -> str:
-    """
-    Safely serialize an object to JSON string.
-
-    Applies sanitization before serialization to handle inf/nan values.
-
-    Args:
-        obj: Object to serialize
-        **kwargs: Additional arguments passed to json.dumps
-
-    Returns:
-        JSON string
-
-    Examples:
-        >>> safe_json_dumps({'value': float('inf')})
-        '{"value": null}'
-    """
-    sanitized = sanitize_for_json(obj)
-    return json.dumps(sanitized, **kwargs)
-
-
 def is_valid_number(value: float) -> bool:
     """
     Check if a float value is valid (not inf, nan, or CoolProp _HUGE).
@@ -120,45 +99,3 @@ def is_valid_number(value: float) -> bool:
     return True
 
 
-def validate_and_sanitize_properties(
-    properties: Dict[str, float],
-    property_names: List[str] = None
-) -> Dict[str, Any]:
-    """
-    Validate and sanitize a dictionary of fluid properties.
-
-    Checks each property for valid numeric values and replaces invalid
-    ones with None while logging warnings.
-
-    Args:
-        properties: Dictionary of property name -> value
-        property_names: Optional list of required property names
-
-    Returns:
-        Sanitized properties dictionary with validity info
-    """
-    result = {
-        'properties': {},
-        'valid': True,
-        'invalid_properties': []
-    }
-
-    for name, value in properties.items():
-        if value is None:
-            result['properties'][name] = None
-            continue
-
-        if is_valid_number(value):
-            result['properties'][name] = value
-        else:
-            result['properties'][name] = None
-            result['invalid_properties'].append(name)
-            result['valid'] = False
-
-    if property_names:
-        missing = [n for n in property_names if n not in result['properties'] or result['properties'][n] is None]
-        if missing:
-            result['valid'] = False
-            result['missing_properties'] = missing
-
-    return result

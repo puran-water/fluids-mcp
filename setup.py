@@ -16,7 +16,8 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/puran-water/fluids-mcp",
-    packages=find_packages(include=["tools", "utils", "pydraulics"], exclude=["tests", "tests.*"]),
+    packages=find_packages(include=["tools", "tools.*", "utils", "utils.*", "pydraulics", "pydraulics.*", "omnitools", "omnitools.*"], exclude=["tests", "tests.*"]),
+    py_modules=["server"],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
@@ -30,15 +31,18 @@ setup(
     python_requires=">=3.10",
     install_requires=[
         "mcp>=1.0.0",
-        "httpx>=0.25.0", 
+        "httpx>=0.25.0",
         "pydantic>=2.0.0",
         "fluids>=1.0.26",
         "scipy>=1.10.0",
         "numpy>=1.24.0",
         "sympy>=1.12.0",
         "CoolProp>=6.4.1",
-        "fluidprop>=1.0.0",
+        "thermo>=0.4.0",
     ],
+    extras_require={
+        "fluidprop": ["fluidprop>=1.0.0"],
+    },
     entry_points={
         "console_scripts": [
             "fluids-mcp=server:main",

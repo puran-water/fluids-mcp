@@ -79,13 +79,10 @@ def parameter_sweep(
     params = locals().copy()
     params.pop("calculation")
     
-    # Preflight checks and auto-defaults
+    # Preflight checks
     if calculation == "blower":
         if inlet_temperature_c is None:
             return '{"error": "inlet_temperature_c is required for blower sweeps"}'
-        # Auto-set allow_property_defaults if no Z-factor or fluid provided
-        if allow_property_defaults is None and gas_z_factor is None and fluid_name is None:
-            params["allow_property_defaults"] = True
     
     if calculation == "pipe_liquid":
         fn = pipe_pressure_drop_sweep

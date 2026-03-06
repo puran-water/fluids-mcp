@@ -315,28 +315,3 @@ def get_pipe_roughness(material: str = None, pipe_roughness: float = None) -> tu
     from utils.constants import DEFAULT_ROUGHNESS
     return DEFAULT_ROUGHNESS, "Default"
 
-def check_fluidprop_available():
-    """Check if fluidprop package is available.
-    
-    Returns:
-        Tuple of (available, module if available or None)
-    """
-    try:
-        from fluidprop import FluidProperties, FLUID_SELECTION
-        return True, (FluidProperties, FLUID_SELECTION)
-    except ImportError:
-        logger.warning("fluidprop module not available. Fluid property lookups will be disabled.")
-        return False, None
-
-def check_coolprop_available():
-    """Check if CoolProp package is available.
-    
-    Returns:
-        Tuple of (available, module if available or None)
-    """
-    try:
-        import CoolProp.CoolProp as CP
-        return True, CP
-    except ImportError:
-        logger.warning("CoolProp module not available. Vapor pressure lookups will be disabled.")
-        return False, None

@@ -66,7 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support for solving gas pipe diameter and length (not just pressure/flow)
 - Integral-averaged Z-factor and Cp calculations for compressor calculations
 - Performance optimizations with property caching and vectorized calculations
-- Input resolver for flexible parameter handling
+- Input resolver for flexible parameter handling (removed in v2.2+ due to MCP parameter validation conflicts)
 
 ### Fixed
 - MCP client parameter validation errors - replaced **kwargs with explicit parameters

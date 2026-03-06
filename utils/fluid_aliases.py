@@ -3,7 +3,6 @@ Fluid name aliases and mapping for common fluid names to CoolProp-compatible nam
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger("fluids-mcp.fluid_aliases")
 

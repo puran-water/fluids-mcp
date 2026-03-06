@@ -6,9 +6,8 @@ performance for repeated property lookups with the same conditions.
 """
 
 import logging
-import math
 from functools import lru_cache
-from typing import Optional, Tuple, Any, Dict
+from typing import Optional, Any, Dict
 import time
 
 from .json_helpers import is_valid_number
@@ -195,87 +194,6 @@ def cached_critical_pressure(fluid_name: str) -> float:
     """
     return cached_props_si('PCRIT', '', 0, '', 0, fluid_name)
 
-@lru_cache(maxsize=100)
-def cached_critical_temperature(fluid_name: str) -> float:
-    """
-    Cached critical temperature lookup.
-    
-    Args:
-        fluid_name: CoolProp fluid name
-        
-    Returns:
-        Critical temperature in K
-    """
-    return cached_props_si('TCRIT', '', 0, '', 0, fluid_name)
-
-@lru_cache(maxsize=1000)
-def cached_fluid_properties(fluid_name: str, temperature_c: float, pressure_bar: float) -> Tuple[float, ...]:
-    """
-    Cached comprehensive fluid properties lookup.
-    
-    This replaces the FluidProperties class instantiation with a cached version
-    that returns the most commonly used properties as a tuple.
-    
-    Args:
-        fluid_name: CoolProp fluid name  
-        temperature_c: Temperature in Celsius
-        pressure_bar: Pressure in bar
-        
-    Returns:
-        Tuple of (density_kg_m3, viscosity_pas, thermal_conductivity_w_mk, 
-                 specific_heat_cp_j_kgk, molecular_weight_kg_kmol, 
-                 kinematic_viscosity_m2s, thermal_diffusivity_m2s)
-    """
-    global _cache_stats
-    
-    # Check if this is a cache hit (for statistics)
-    cache_info = cached_fluid_properties.cache_info()
-    prev_hits = cache_info.hits
-    
-    start_time = time.time()
-    
-    try:
-        from .import_helpers import FluidProperties
-
-        if FluidProperties is None:
-            raise ImportError("FluidProperties is not available (fluidprop package not installed)")
-
-        # Create FluidProperties object (this is expensive)
-        fluid_props = FluidProperties(
-            coolprop_name=fluid_name,
-            T_in_deg_C=temperature_c,
-            P_in_bar=pressure_bar
-        )
-        
-        # Extract commonly used properties
-        result = (
-            float(fluid_props.rho[0]),      # density kg/m³
-            float(fluid_props.eta[0]),      # dynamic viscosity Pa·s
-            float(fluid_props.lambda_[0]),  # thermal conductivity W/(m·K)
-            float(fluid_props.Cp[0]),       # specific heat J/(kg·K)
-            float(fluid_props.MW),          # molecular weight kg/kmol
-            float(fluid_props.nu[0]),       # kinematic viscosity m²/s
-            float(fluid_props.alpha[0])     # thermal diffusivity m²/s
-        )
-        
-        # Update statistics
-        elapsed_time = time.time() - start_time
-        new_cache_info = cached_fluid_properties.cache_info()
-        
-        if new_cache_info.hits > prev_hits:
-            # This was a cache hit
-            _cache_stats["hits"] += 1
-            _cache_stats["total_time_saved"] += elapsed_time * 0.95  # Estimate 95% time saved
-        else:
-            # This was a cache miss  
-            _cache_stats["misses"] += 1
-            
-        return result
-        
-    except Exception as e:
-        logger.warning("FluidProperties calculation failed: %s", e)
-        raise
-
 class CachedFluidProperties:
     """
     Cached replacement for FluidProperties class.
@@ -379,12 +297,6 @@ def get_cache_info() -> Dict[str, Any]:
             "maxsize": cached_critical_pressure.cache_info().maxsize,
             "currsize": cached_critical_pressure.cache_info().currsize
         },
-        "fluid_properties_cache": {
-            "hits": cached_fluid_properties.cache_info().hits,
-            "misses": cached_fluid_properties.cache_info().misses,
-            "maxsize": cached_fluid_properties.cache_info().maxsize,
-            "currsize": cached_fluid_properties.cache_info().currsize
-        },
         "overall_stats": get_cache_stats()
     }
 
@@ -393,6 +305,5 @@ def clear_all_caches():
     cached_props_si.cache_clear()
     cached_saturation_pressure.cache_clear()
     cached_critical_pressure.cache_clear()
-    cached_fluid_properties.cache_clear()
     clear_cache_stats()
     logger.info("All property caches cleared")

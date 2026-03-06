@@ -1,4 +1,4 @@
-# Installation Guide - Fluids MCP Server v2.1
+# Installation Guide - Fluids MCP Server
 
 ## Quick Install
 
@@ -12,7 +12,6 @@ The enhanced blower compressor tool with expert reviewer recommendations require
 
 ### Core Dependencies
 - `thermo>=0.4.0` - For equation of state calculations with Chemical objects
-- `pandas>=2.0.0` - For sweep() function DataFrame output  
 - `scipy>=1.10.0` - For numerical integration (quad) and optimization
 - `numpy>=1.24.0` - For sweep() function array operations
 
@@ -53,7 +52,7 @@ print(f"Sweep test successful: {result_data['summary']['successful_points']} poi
 ## Troubleshooting
 
 If you get import errors:
-1. Ensure you're using Python 3.8+
+1. Ensure you're using Python 3.10+
 2. Install thermo separately: `pip install thermo>=0.4.0`
 3. For Windows, may need: `pip install --no-deps thermo` then `pip install -r requirements.txt`
 
@@ -61,7 +60,7 @@ If you get import errors:
 
 The latest implementation includes:
 - ✅ Integral-averaged Z-factor and Cp calculations using EOS
-- ✅ solve_for parameter framework for all major calculations
+- ✅ solve_for parameter framework for gas pipe calculations (P1, P2, L, Q, D)
 - ✅ sweep functions (pipe_pressure_drop_sweep, gas_pipe_sweep, blower_sweep) returning JSON
 - ✅ Real gas properties via Peng-Robinson EOS
 - ✅ Velocity head corrections for pump calculations with different nozzle sizes

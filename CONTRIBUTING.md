@@ -39,7 +39,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 3. Create a virtual environment:
    ```bash
    python -m venv venv
-   source venv/bin/activate  # or venv\Scripts\activate on Windows
+   source venv/bin/activate
    ```
 
 4. Install in development mode:
@@ -61,8 +61,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 4. Run the test suite:
    ```bash
-   python test_fluids_mcp.py
-   python test_fixes.py
+   python -m pytest tests/ -v
    ```
 
 5. Commit your changes:
@@ -151,8 +150,9 @@ Update documentation for valve sizing methods
        # Return JSON result
    ```
 
-3. Add the tool to `server.py`
-4. Update documentation
+3. Create an omnitool wrapper in `omnitools/` using the discriminator pattern (see `pipe_flow.py` as a reference)
+4. Register the omnitool in `server.py`
+5. Update documentation
 
 ### Adding Unit Conversions
 

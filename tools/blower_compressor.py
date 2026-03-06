@@ -30,7 +30,6 @@ from utils.constants import (
     LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS, DEG_C_to_K
 )
 from utils.helpers import get_fitting_K
-from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.calculate_blower_compressor_requirements")
@@ -124,53 +123,7 @@ def get_chemical_properties(fluid_name, T, P):
             'chemical_obj': chemical
         }
     except Exception as e:
-        # Debug: print the exception
-        print(f"DEBUG: get_chemical_properties failed for {fluid_name}: {e}")
-        return None
-
-def solve_compression_for_variable(solve_for, **kwargs):
-    """Solve compression equations for specific variable using numerical methods"""
-    if not THERMO_AVAILABLE:
-        raise ValueError("thermo library required for solve_for functionality")
-    
-    from scipy.optimize import fsolve
-    
-    def compression_equation(x):
-        """Equation to solve based on what we're solving for"""
-        if solve_for == "P2":
-            # Solve for outlet pressure given everything else
-            kwargs_copy = kwargs.copy()
-            kwargs_copy['outlet_pressure'] = x[0]
-            result = calculate_blower_compressor_requirements(**kwargs_copy)
-            # Extract target vs actual comparison (would need to modify main function)
-            return x[0] - kwargs.get('target_P2', x[0])  # Placeholder
-        elif solve_for == "flow":
-            # Solve for flow rate given power constraint
-            kwargs_copy = kwargs.copy()
-            kwargs_copy['flow_rate_kg_s'] = x[0]
-            # Similar logic would go here
-            return x[0] - kwargs.get('target_flow', x[0])  # Placeholder
-        elif solve_for == "efficiency":
-            # Solve for efficiency given power constraint
-            kwargs_copy = kwargs.copy()
-            kwargs_copy['efficiency'] = x[0]
-            # Similar logic would go here
-            return x[0] - kwargs.get('target_efficiency', x[0])  # Placeholder
-    
-    # Initial guess and solve
-    if solve_for == "P2":
-        initial_guess = [kwargs.get('inlet_pressure', 101325) * 2]
-    elif solve_for == "flow":
-        initial_guess = [1.0]  # kg/s
-    elif solve_for == "efficiency":
-        initial_guess = [0.7]
-    else:
-        raise ValueError(f"Unknown solve_for parameter: {solve_for}")
-    
-    try:
-        solution = fsolve(compression_equation, initial_guess)
-        return solution[0]
-    except Exception:
+        logger.debug(f"get_chemical_properties failed for {fluid_name}: {e}")
         return None
 
 def calculate_blower_compressor_requirements(
@@ -207,7 +160,6 @@ def calculate_blower_compressor_requirements(
     
     # --- Advanced EOS Options ---
     use_eos_calculations: bool = True,                # Use equation of state for accurate Z-factor and Cp calculations (requires thermo library)
-    solve_for: Optional[str] = None                   # Solve for specific variable: "P2", "flow", "efficiency" (if None, calculates normally)
 
 ) -> str:
     """Estimates discharge temperature and power requirements for a gas compressor or blower.
@@ -297,7 +249,7 @@ def calculate_blower_compressor_requirements(
         integral_z_factor = None
         integral_cp = None
         gas_prop_source = "Provided"
-        prop_resolved = True
+        prop_resolved = all(p is not None for p in [local_gas_mw, local_gas_gamma])
 
         # Try EOS-based calculations first if enabled and thermo available
         if use_eos_calculations and THERMO_AVAILABLE and fluid_name is not None:
@@ -328,60 +280,38 @@ def calculate_blower_compressor_requirements(
             except Exception as eos_e:
                 results_log.append(f"EOS calculation failed ({eos_e}), falling back to FluidProp lookup.")
 
-        # If EOS failed or disabled, try FluidProp lookup
+        # If EOS failed or disabled, try centralized property resolver (CoolProp → fluidprop → thermo)
         if any(p is None for p in [local_gas_mw, local_gas_gamma]) and fluid_name is not None:
             if not prop_resolved:  # Only if EOS didn't work
                 gas_prop_source = f"Lookup ({fluid_name} @ {inlet_temperature_c} C)"
-                results_log.append(f"Attempting FluidProp property lookup for '{fluid_name}'.")
-                if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
-                    try:
-                        # Use average pressure for lookup if P1/P2 are known, else use 1 atm default
-                        avg_p_pa = 101325.0
-                        if inlet_pressure is not None and outlet_pressure is not None:
-                            avg_p_pa = (inlet_pressure + outlet_pressure) / 2.0
-                        elif inlet_pressure is not None:
-                            avg_p_pa = inlet_pressure # Approximate with inlet if outlet unknown
-                        # Convert average pressure from Pa to bar for lookup
-                        lookup_p_bar = avg_p_pa / 100000.0
+                results_log.append(f"Attempting property lookup for '{fluid_name}'.")
+                try:
+                    from utils.resolve_properties import resolve_gas_properties
+                    avg_p_pa = 101325.0
+                    if inlet_pressure is not None and outlet_pressure is not None:
+                        avg_p_pa = (inlet_pressure + outlet_pressure) / 2.0
+                    elif inlet_pressure is not None:
+                        avg_p_pa = inlet_pressure
+                    lookup_p_bar = avg_p_pa / 100000.0
 
-                        # Try FluidProperties directly first
-                        try:
-                            fluid_props = FluidProperties(coolprop_name=fluid_name, T_in_deg_C=inlet_temperature_c, P_in_bar=lookup_p_bar)
-                            actual_fluid_name = fluid_name
-                        except Exception:
-                            # Fallback to FLUID_SELECTION validation if direct lookup fails
-                            try:
-                                valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
-                            except (TypeError, IndexError):
-                                valid_fluids = []
-                            actual_fluid_name = fluid_name
-                            if not valid_fluids or fluid_name not in valid_fluids:
-                                match = next((f for f in valid_fluids if f.lower() == fluid_name.lower()), None)
-                                if match: actual_fluid_name = match
-                                else: raise ValueError(f"Fluid '{fluid_name}' not found in fluidprop.")
-
-                            fluid_props = FluidProperties(coolprop_name=actual_fluid_name, T_in_deg_C=inlet_temperature_c, P_in_bar=lookup_p_bar)
-                        if local_gas_mw is None: local_gas_mw = float(fluid_props.MW)  # Already in kg/kmol from FluidProperties
-                        if local_gas_gamma is None:
-                            # Safely access gamma attribute or calculate from Cp/Cv if available
-                            if hasattr(fluid_props, 'gamma'):
-                                local_gas_gamma = float(fluid_props.gamma[0])
-                            elif hasattr(fluid_props, 'Cp') and hasattr(fluid_props, 'Cv') and float(fluid_props.Cv[0]) != 0:
-                                local_gas_gamma = float(fluid_props.Cp[0]) / float(fluid_props.Cv[0])
-                        if local_gas_z_factor is None:
-                            # Safely access Z attribute
-                            if hasattr(fluid_props, 'Z'):
-                                local_gas_z_factor = float(fluid_props.Z[0])
-                        gas_prop_info = {"name_used": actual_fluid_name, "lookup_temp_c": inlet_temperature_c, "lookup_p_bar": lookup_p_bar}
+                    gas_props = resolve_gas_properties(fluid_name, inlet_temperature_c, lookup_p_bar)
+                    if gas_props is not None:
+                        if local_gas_mw is None and gas_props.mw is not None:
+                            local_gas_mw = gas_props.mw
+                        if local_gas_gamma is None and gas_props.gamma is not None:
+                            local_gas_gamma = gas_props.gamma
+                        if local_gas_z_factor is None and gas_props.z_factor is not None:
+                            local_gas_z_factor = gas_props.z_factor
+                        gas_prop_info = {"source": gas_props.source, "lookup_temp_c": inlet_temperature_c, "lookup_p_bar": lookup_p_bar}
+                        gas_prop_source = f"Resolver ({gas_props.source})"
                         prop_resolved = True
-
-                    except Exception as prop_lookup_e:
-                        error_log.append(f"Warning: Property lookup failed for '{fluid_name}': {prop_lookup_e}. Falling back to defaults.")
+                    else:
+                        error_log.append(f"Warning: Property lookup failed for '{fluid_name}'. Falling back to defaults.")
                         gas_prop_source = "Lookup Failed - Using Defaults"
-                        prop_resolved = False # Mark as failed
-                else:
-                    error_log.append("Warning: Property lookup skipped (fluidprop unavailable). Falling back to defaults.")
-                    gas_prop_source = "Defaults (fluidprop unavailable)"
+                        prop_resolved = False
+                except Exception as prop_lookup_e:
+                    error_log.append(f"Warning: Property lookup failed for '{fluid_name}': {prop_lookup_e}. Falling back to defaults.")
+                    gas_prop_source = "Lookup Failed - Using Defaults"
                     prop_resolved = False
 
             elif gas_composition_mol is not None:
@@ -684,7 +614,6 @@ def blower_sweep(
     polytropic_n: Optional[float] = None,
     allow_property_defaults: bool = False,
     use_eos_calculations: bool = True,
-    solve_for: Optional[str] = None
 ) -> str:
     """Parameter sweep for blower compressor analysis
     
@@ -730,7 +659,6 @@ def blower_sweep(
         'polytropic_n': polytropic_n,
         'allow_property_defaults': allow_property_defaults,
         'use_eos_calculations': use_eos_calculations,
-        'solve_for': solve_for
     }
     
     # Remove None values

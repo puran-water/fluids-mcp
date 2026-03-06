@@ -13,13 +13,10 @@ import fluids.piping       # Explicitly import submodule used
 
 # Import shared utilities
 from utils.constants import (
-    GPM_to_M3S, INCH_to_M, FT_to_M, PSI_to_PA, 
-    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS, DEG_C_to_K
+    GPM_to_M3S, INCH_to_M, FT_to_M, PSI_to_PA,
+    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEG_C_to_K
 )
 from utils.helpers import get_fitting_K
-from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION
-from utils.property_cache import CachedFluidProperties
-from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.calculate_gas_pipe_pressure_drop")
@@ -55,6 +52,9 @@ def calculate_gas_pipe_pressure_drop(
     method: Literal["Weymouth", "Panhandle_A", "Panhandle_B", "IGT", "Oliphant", "Spitzglass_low", 
                     "Spitzglass_high", "isothermal_darcy"] = "Weymouth",
     
+    # --- Default Handling ---
+    allow_property_defaults: bool = False,  # Allow using default gas properties (MW=28.96, gamma=1.4, Z=1.0) which can cause >10% error for non-air gases
+
     # --- Fittings (optional) ---
     fittings: Optional[list] = None,  # List of fittings with type, quantity, and optional K_value
 ) -> str:
@@ -244,7 +244,6 @@ def calculate_gas_pipe_pressure_drop(
             for p in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity]
         )
         if needs_resolution:
-            lookup_status = "Not Attempted"
             # Pre-compute an average/representative pressure for property evaluation
             avg_p_pa = None
             if inlet_pressure is not None and outlet_pressure is not None:
@@ -333,243 +332,93 @@ def calculate_gas_pipe_pressure_drop(
                         "lookup_temp_c": temperature_c,
                         "lookup_p_bar": (P_pa/1e5) if P_pa is not None else None,
                     }
-                    lookup_status = "Mixture Success"
                 except Exception as mix_e:
                     error_log.append(f"Warning: Mixture property calculation failed: {mix_e}")
                     results_log.append("Falling back to single-fluid lookup or defaults")
-                    lookup_status = "Mixture Failed"
 
-            # 3b. Single-fluid property lookup via fluidprop/CoolProp
+            # 3b. Single-fluid property lookup via centralized resolver (CoolProp → fluidprop → thermo)
             if fluid_name is not None and (
                 any(v is None for v in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity])
             ):
                 results_log.append(f"Attempting property lookup for '{fluid_name}' at T={temperature_c} C.")
                 try:
+                    from utils.resolve_properties import resolve_gas_properties
                     lookup_p_bar = (avg_p_pa / 100000.0) if avg_p_pa else 1.0
-
-                    # Map fluid name through aliasing system first
-                    actual_fluid_name = map_fluid_name(fluid_name)
-
-                    # Primary: Try CachedFluidProperties (uses CoolProp directly)
-                    fluid_props = None
-                    try:
-                        fluid_props = CachedFluidProperties(
-                            coolprop_name=actual_fluid_name,
-                            T_in_deg_C=temperature_c,
-                            P_in_bar=lookup_p_bar
-                        )
-                    except Exception as e:
-                        logger.debug(f"CachedFluidProperties failed for {actual_fluid_name}: {e}")
-                        # Fallback: Try FluidProperties from fluidprop if available
-                        if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
-                            try:
-                                fluid_props = FluidProperties(
-                                    coolprop_name=actual_fluid_name,
-                                    T_in_deg_C=temperature_c,
-                                    P_in_bar=lookup_p_bar
-                                )
-                            except Exception:
-                                # If mapped name fails, try FLUID_SELECTION validation
-                                try:
-                                    valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
-                                except (TypeError, IndexError):
-                                    valid_fluids = []
-                                if not valid_fluids or actual_fluid_name not in valid_fluids:
-                                    match = next(
-                                        (f for f in valid_fluids if f.lower() == actual_fluid_name.lower()), None
-                                    )
-                                    if match:
-                                        actual_fluid_name = match
-                                    else:
-                                        raise ValueError(f"Fluid '{fluid_name}' (mapped to '{actual_fluid_name}') not found.")
-
-                                fluid_props = FluidProperties(
-                                    coolprop_name=actual_fluid_name,
-                                    T_in_deg_C=temperature_c,
-                                    P_in_bar=lookup_p_bar
-                                )
-
-                    if fluid_props is None:
-                        raise ValueError(f"Could not get properties for '{fluid_name}'")
-
-                    lookup_status = f"Lookup Success ({actual_fluid_name})"
-
-                    import math as _math
-
-                    def _is_bad(x):
-                        try:
-                            return x is None or (isinstance(x, float) and _math.isnan(x))
-                        except Exception:
-                            return False
-
-                    # MW
-                    if local_gas_mw is None:
-                        try:
-                            mw_val = float(fluid_props.MW)
-                            if not _is_bad(mw_val) and mw_val > 0:
-                                local_gas_mw = mw_val
-                                gas_prop_source["MW"] = lookup_status
-                        except Exception:
-                            pass
-
-                    # gamma
-                    if local_gas_gamma is None:
-                        gamma_val = None
-                        try:
-                            if hasattr(fluid_props, 'gamma'):
-                                gamma_val = float(fluid_props.gamma[0])
-                            elif hasattr(fluid_props, 'Cp') and hasattr(fluid_props, 'Cv'):
-                                cv = float(fluid_props.Cv[0])
-                                cp = float(fluid_props.Cp[0])
-                                if cv and not _is_bad(cv) and not _is_bad(cp):
-                                    gamma_val = cp/cv
-                        except Exception:
-                            gamma_val = None
-                        if gamma_val and gamma_val > 1.0:
-                            local_gas_gamma = gamma_val
-                            gas_prop_source["gamma"] = lookup_status + (" (Cp/Cv)" if 'Cp' in gas_prop_source.get('gamma','') else '')
-
-                    # Z factor
-                    if local_gas_z_factor is None:
-                        try:
-                            if hasattr(fluid_props, 'Z'):
-                                z_val = float(fluid_props.Z[0])
-                                if not _is_bad(z_val) and z_val > 0:
-                                    local_gas_z_factor = z_val
-                                    gas_prop_source["Z"] = lookup_status
-                        except Exception:
-                            pass
-
-                    # Viscosity
-                    if local_gas_viscosity is None:
-                        try:
-                            if hasattr(fluid_props, 'eta'):
-                                mu_val = float(fluid_props.eta[0])
-                                if not _is_bad(mu_val) and mu_val > 0:
-                                    local_gas_viscosity = mu_val
-                                    gas_prop_source["viscosity"] = lookup_status
-                        except Exception:
-                            pass
-
-                    gas_prop_info = {
-                        "name_used": actual_fluid_name,
-                        "lookup_temp_c": temperature_c,
-                        "lookup_p_bar": lookup_p_bar,
-                        "viscosity_pas": local_gas_viscosity
-                    }
-
-                    # If any key properties are still missing or NaN (e.g., SO2 issues),
-                    # fall back to thermo.Chemical for robust values
-                    need_fallback = any(
-                        v is None for v in [local_gas_mw, local_gas_gamma, local_gas_z_factor, local_gas_viscosity]
-                    )
-                    if need_fallback:
-                        try:
-                            from thermo.chemical import Chemical
-                            # Build candidate identifiers for Chemical
-                            cand = [actual_fluid_name]
-                            try:
-                                import re as _re
-                                spaced = _re.sub(r'(?<!^)(?=[A-Z])', ' ', actual_fluid_name)
-                                cand.extend([spaced, spaced.lower(), actual_fluid_name.lower()])
-                            except Exception:
-                                pass
-                            # Specific common formulas
-                            formula_map = {
-                                'sulfurdioxide': 'SO2', 'sulfur dioxide': 'SO2', 'sulphur dioxide': 'SO2',
-                                'carbondioxide': 'CO2', 'carbon dioxide': 'CO2',
-                                'hydrogensulfide': 'H2S', 'hydrogen sulfide': 'H2S',
-                            }
-                            cand.extend([formula_map.get(c, c) for c in list(cand)])
-                            chem = None
-                            last_err = None
-                            for ident in cand:
-                                try:
-                                    chem = Chemical(ident, T=local_T_k, P=(lookup_p_bar*1e5))
-                                    if chem and chem.P is not None:
-                                        break
-                                except Exception as ee:
-                                    last_err = ee
-                                    chem = None
-                            if chem is not None:
-                                # MW in g/mol
-                                if local_gas_mw is None and getattr(chem, 'MW', None):
-                                    local_gas_mw = float(chem.MW)
-                                    gas_prop_source["MW"] = "thermo.Chemical fallback"
-                                # gamma
-                                if local_gas_gamma is None:
-                                    try:
-                                        Cpg = float(chem.Cpg)
-                                        Cvg = float(chem.Cvg)
-                                        if Cvg > 0:
-                                            local_gas_gamma = Cpg/Cvg
-                                            gas_prop_source["gamma"] = "thermo.Chemical fallback"
-                                    except Exception:
-                                        pass
-                                # Z
-                                if local_gas_z_factor is None:
-                                    try:
-                                        z_val = float(chem.Zg)
-                                        if z_val > 0:
-                                            local_gas_z_factor = z_val
-                                            gas_prop_source["Z"] = "thermo.Chemical fallback"
-                                    except Exception:
-                                        pass
-                                # mu
-                                if local_gas_viscosity is None:
-                                    try:
-                                        mu_val = float(chem.mug)
-                                        if mu_val > 0:
-                                            local_gas_viscosity = mu_val
-                                            gas_prop_source["viscosity"] = "thermo.Chemical fallback"
-                                    except Exception:
-                                        pass
-                                results_log.append("Used thermo.Chemical fallback for missing/NaN properties")
-                            else:
-                                error_log.append(f"Warning: thermo.Chemical fallback failed: {last_err}")
-                        except Exception as fb_e:
-                            error_log.append(f"Warning: Fallback to thermo.Chemical failed: {fb_e}")
-
+                    gas_props = resolve_gas_properties(fluid_name, temperature_c, lookup_p_bar)
+                    if gas_props is not None:
+                        if local_gas_mw is None and gas_props.mw is not None:
+                            local_gas_mw = gas_props.mw
+                            gas_prop_source["MW"] = gas_props.source
+                        if local_gas_gamma is None and gas_props.gamma is not None:
+                            local_gas_gamma = gas_props.gamma
+                            gas_prop_source["gamma"] = gas_props.source
+                        if local_gas_z_factor is None and gas_props.z_factor is not None:
+                            local_gas_z_factor = gas_props.z_factor
+                            gas_prop_source["Z"] = gas_props.source
+                        if local_gas_viscosity is None and gas_props.viscosity is not None:
+                            local_gas_viscosity = gas_props.viscosity
+                            gas_prop_source["viscosity"] = gas_props.source
+                        gas_prop_info = {
+                            "name_used": fluid_name,
+                            "lookup_temp_c": temperature_c,
+                            "lookup_p_bar": lookup_p_bar,
+                            "viscosity_pas": local_gas_viscosity
+                        }
+                        results_log.extend(gas_props.log)
+                        prop_resolved = True
+                    else:
+                        error_log.append(f"Warning: Property lookup failed for '{fluid_name}': all backends failed.")
+                        prop_resolved = False
                 except Exception as prop_lookup_e:
                     lookup_p_bar = (avg_p_pa / 100000.0) if avg_p_pa else 1.0
                     detailed_error = (
                         f"Property lookup failed for '{fluid_name}' at T={temperature_c}C, "
                         f"P={lookup_p_bar}bar: {type(prop_lookup_e).__name__}: {str(prop_lookup_e)}"
                     )
-                    error_log.append(
-                        f"Warning: {detailed_error}. Falling back to defaults/estimates."
-                    )
+                    error_log.append(f"Warning: {detailed_error}.")
                     logger.warning(detailed_error)
-                    lookup_status = "Lookup Failed"
-                    if gas_mw is None:
-                        gas_prop_source["MW"] = lookup_status
-                    if gas_gamma is None:
-                        gas_prop_source["gamma"] = lookup_status
-                    if gas_z_factor is None:
-                        gas_prop_source["Z"] = lookup_status
                     prop_resolved = False
 
-            # Apply defaults if still None
+            # Apply defaults if still None — gated on allow_property_defaults
+            missing_props = []
             if local_gas_mw is None:
-                local_gas_mw = 28.96
-                results_log.append("Using default MW (Air).")
-                gas_prop_source["MW"] = "Default (Air)"
+                if allow_property_defaults:
+                    local_gas_mw = 28.96
+                    results_log.append("Using default MW (Air).")
+                    gas_prop_source["MW"] = "Default (Air)"
+                else:
+                    missing_props.append("MW (molecular weight)")
                 prop_resolved = False
             if local_gas_gamma is None:
-                local_gas_gamma = 1.4
-                results_log.append("Using default gamma (Air).")
-                gas_prop_source["gamma"] = "Default (Air)"
+                if allow_property_defaults:
+                    local_gas_gamma = 1.4
+                    results_log.append("Using default gamma (Air).")
+                    gas_prop_source["gamma"] = "Default (Air)"
+                else:
+                    missing_props.append("gamma (specific heat ratio)")
                 prop_resolved = False
             if local_gas_z_factor is None:
-                local_gas_z_factor = 1.0
-                results_log.append("Using default Z-factor (Ideal).")
-                gas_prop_source["Z"] = "Default (Ideal)"
+                if allow_property_defaults:
+                    local_gas_z_factor = 1.0
+                    results_log.append("Using default Z-factor (Ideal).")
+                    gas_prop_source["Z"] = "Default (Ideal)"
+                else:
+                    missing_props.append("Z-factor (compressibility)")
                 prop_resolved = False
             if local_gas_viscosity is None:
-                local_gas_viscosity = 1.8e-5
-                results_log.append("Using default viscosity (Air).")
-                gas_prop_source["viscosity"] = "Default (Air)"
+                if allow_property_defaults:
+                    local_gas_viscosity = 1.8e-5
+                    results_log.append("Using default viscosity (Air).")
+                    gas_prop_source["viscosity"] = "Default (Air)"
+                else:
+                    missing_props.append("viscosity")
                 prop_resolved = False
+            if missing_props and not allow_property_defaults:
+                error_log.append(
+                    f"Missing gas properties: {', '.join(missing_props)}. "
+                    "Provide gas_mw/gas_gamma/gas_z_factor/gas_viscosity, fluid_name, or set allow_property_defaults=True."
+                )
+                return json.dumps({"errors": error_log, "log": results_log, "gas_properties": gas_prop_info})
 
         # Store final gas properties
         gas_prop_info.update({
@@ -1043,20 +892,22 @@ def gas_pipe_sweep(
     gas_viscosity: Optional[float] = None,
     fluid_name: Optional[str] = None,
     gas_composition_mol: Optional[Dict[str, float]] = None,
-    method: str = "Weymouth"
+    method: str = "Weymouth",
+    allow_property_defaults: bool = False
 ) -> str:
     """Parameter sweep for gas pipe pressure drop analysis
-    
+
     Optimized for performance with large datasets (1e4+ points) per expert reviewer recommendation.
     Sweeps one variable while keeping others constant to analyze system behavior.
-    
+
     Args:
         variable: Variable to sweep ('inlet_pressure', 'outlet_pressure', 'pipe_length', 'flow_rate_norm_m3_hr', 'pipe_diameter')
         start: Start value for sweep
         stop: Stop value for sweep
         n: Number of points in sweep
+        allow_property_defaults: Allow using default gas properties (MW=28.96, gamma=1.4, Z=1.0)
         **other_params: All other parameters from calculate_gas_pipe_pressure_drop
-    
+
     Returns:
         JSON string with sweep results as list of dictionaries
     """
@@ -1095,11 +946,12 @@ def gas_pipe_sweep(
         'gas_viscosity': gas_viscosity,
         'fluid_name': fluid_name,
         'gas_composition_mol': gas_composition_mol,
-        'method': method
+        'method': method,
+        'allow_property_defaults': allow_property_defaults
     }
-    
-    # Remove None values
-    base_kwargs = {k: v for k, v in base_kwargs.items() if v is not None}
+
+    # Remove None values (but keep allow_property_defaults even if False)
+    base_kwargs = {k: v for k, v in base_kwargs.items() if v is not None or k == 'allow_property_defaults'}
     
     for value in sweep_values:
         try:

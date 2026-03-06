@@ -172,6 +172,9 @@ FIXES_SUMMARY.md
 *.rar
 PuranWebsite.zip
 
+# User-specific MCP config (use .mcp.json.example as template)
+.mcp.json
+
 # Development files not for end users
 .claude/
 .codex/

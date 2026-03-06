@@ -56,7 +56,7 @@ class TestFluidProperties:
         # Should not have errors now that property lookup is fixed
         assert "errors" not in result_dict or not result_dict["errors"]
         assert "density_kg_m3" in result_dict
-        assert "molecular_weight_kg_mol" in result_dict
+        assert "molecular_weight_kg_kmol" in result_dict
 
 
 class TestCachedFluidPropertiesRegressions:
@@ -183,7 +183,7 @@ class TestGasFlowCalculations:
 
         # Should either calculate successfully OR have graceful error with log
         # On some platforms (e.g., macOS), property lookup may fail due to binary deps
-        has_result = "pressure_drop_total_pa" in result_dict or "outlet_pressure" in result_dict
+        has_result = "pressure_drop_total_pa" in result_dict or "outlet_pressure" in result_dict or "pressure_drop_pa" in result_dict
         has_graceful_error = "errors" in result_dict and "log" in result_dict and len(result_dict.get("log", [])) > 0
         assert has_result or has_graceful_error, f"Expected results or graceful error, got: {result_dict.keys()}"
 
@@ -281,7 +281,7 @@ class TestWastewaterTreatmentScenarios:
         result = calculate_gas_pipe_pressure_drop(
             flow_rate_norm_m3_hr=500,   # Typical biogas flow
             fluid_name="Methane",       # Biogas approximation
-            inlet_pressure=103000,      # ~1.5 psig
+            inlet_pressure=111668,      # ~1.5 psig (~16.2 psia)
             pipe_length=200,            # 200m pipe run
             nominal_size_in=6,          # 6" pipe
             schedule="40",
@@ -296,15 +296,15 @@ class TestWastewaterTreatmentScenarios:
             assert pressure_drop > 0
         elif "outlet_pressure" in result_dict:
             outlet_pressure = result_dict["outlet_pressure"]
-            assert outlet_pressure < 103000  # Should have some pressure drop
+            assert outlet_pressure < 111668  # Should have some pressure drop
     
     def test_biogas_control_valve(self):
         """Test biogas control valve for pressure regulation."""
         result = calculate_gas_control_valve(
             flow_rate_norm_m3_hr=200,   # Small biogas flow
             fluid_name="Methane",
-            inlet_pressure_psi=2.0,     # 2 psig
-            outlet_pressure_psi=0.5,    # 0.5 psig
+            inlet_pressure_psi=16.7,    # ~2 psig (16.7 psia)
+            outlet_pressure_psi=15.2,   # ~0.5 psig (15.2 psia)
             inlet_temperature_c=35,
             valve_type="butterfly"
         )

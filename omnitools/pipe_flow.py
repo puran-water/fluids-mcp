@@ -50,6 +50,7 @@ def pipe_flow(
         "Weymouth", "Panhandle_A", "Panhandle_B", "IGT", "Oliphant",
         "Spitzglass_low", "Spitzglass_high", "isothermal_darcy"
     ] = "Weymouth",
+    allow_property_defaults: bool = False,
 ) -> str:
     """
     Unified pipe flow calculations for liquid and gas phases.

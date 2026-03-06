@@ -46,7 +46,9 @@ def control_valve(
     gas_z_factor: Optional[float] = None,
     gas_viscosity: Optional[float] = None,
     valve_xt: Optional[float] = None,
-    
+    gas_composition_mol: Optional[dict] = None,
+    allow_property_defaults: bool = False,
+
     # Common valve parameters
     valve_type: Literal["globe", "butterfly", "ball", "gate", "other"] = "globe",
     size_units: Literal["m", "inch", "mm"] = "inch",

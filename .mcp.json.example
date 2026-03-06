@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "fluids-mcp": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/fluids-mcp",
+        "run",
+        "python",
+        "server.py"
+      ],
+      "env": {
+        "MCP_TIMEOUT": "600000",
+        "MCP_SIMULATION_TIMEOUT_S": "280"
+      }
+    }
+  }
+}

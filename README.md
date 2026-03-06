@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org)
 [![CoolProp](https://img.shields.io/badge/CoolProp-6.6.0-green)](http://www.coolprop.org)
 [![Fluids](https://img.shields.io/badge/Fluids-1.0.26-green)](https://github.com/CalebBell/fluids)
-[![Thermo](https://img.shields.io/badge/Thermo-0.3.0-green)](https://github.com/CalebBell/thermo)
+[![Thermo](https://img.shields.io/badge/Thermo-0.4.0-green)](https://github.com/CalebBell/thermo)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 [![Status](https://img.shields.io/badge/Status-In%20Development-yellow)](https://github.com/puran-water/fluids-mcp)
 
@@ -51,7 +51,7 @@ This MCP server provides 8 consolidated omnitools that encapsulate 17+ specializ
 - **Open Channel Flow**: Manning equation and normal depth calculations
 
 ### Optimization Tools
-- **Parameter Sweeps**: Vectorized calculations for 10,000+ data points
+- **Parameter Sweeps**: Iterative calculations over sweep ranges for 10,000+ data points
 - **Design Space Exploration**: Systematic variation of operating parameters
 - **Constraint-Based Sizing**: Automatic pipe selection within pressure drop limits
 - **Multi-Variable Analysis**: Sweep any parameter while holding others constant
@@ -68,7 +68,7 @@ This MCP server provides 8 consolidated omnitools that encapsulate 17+ specializ
 git clone https://github.com/puran-water/fluids-mcp.git
 cd fluids-mcp
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -86,9 +86,11 @@ Add to your configuration file:
 {
   "mcpServers": {
     "fluids-mcp": {
-      "command": "python",
-      "args": ["/absolute/path/to/fluids-mcp/server.py"],
-      "env": {}
+      "command": "uv",
+      "args": ["--directory", "/absolute/path/to/fluids-mcp", "run", "python", "server.py"],
+      "env": {
+        "MCP_TIMEOUT": "600000"
+      }
     }
   }
 }
@@ -114,9 +116,9 @@ Valve sizing calculations per IEC 60534 standards.
 
 **Parameters:**
 - `phase`: "liquid" or "gas" - Service type
-- **Common**: `inlet_pressure`, `outlet_pressure`, `temperature_c`, `valve_type`, `size_units`
-- **Liquid**: `flow_rate` (m³/s), `fluid_density`, `fluid_viscosity`, `fluid_saturation_pressure`
-- **Gas**: `flow_rate_kg_s`, `gas_mw`, `gas_gamma`, `gas_z_factor`
+- **Common**: `inlet_pressure`, `outlet_pressure`, `valve_type`, `size_units`
+- **Liquid**: `flow_rate` (m³/s), `fluid_density`, `fluid_viscosity`, `fluid_saturation_pressure_pa`
+- **Gas**: `inlet_temperature_c`, `flow_rate_kg_s`, `gas_mw`, `gas_gamma`, `gas_z_factor`
 
 **Returns:** JSON with Cv, Kv, recommended valve size, flow characteristics
 
@@ -241,6 +243,7 @@ fluids-mcp/
 │   ├── helpers.py          # Common functions (get_fitting_K with 60+ fittings)
 │   ├── json_helpers.py     # JSON sanitization for inf/nan handling
 │   ├── import_helpers.py   # Dependency management
+│   ├── resolve_properties.py # Centralized property resolver (CoolProp → fluidprop → thermo)
 │   ├── property_cache.py   # CoolProp caching with validation
 │   └── fluid_aliases.py    # Name mapping ("natural gas" → "Methane")
 ├── pydraulics/            # Open channel hydraulics engine
@@ -251,9 +254,9 @@ fluids-mcp/
 ### Key Design Patterns
 
 #### Omnitool Pattern
-Each omnitool acts as a discriminator-based wrapper:
+Each omnitool acts as a discriminator-based wrapper that filters parameters via `inspect.signature()`:
 ```python
-def pipe_flow(phase: Literal["liquid", "gas"], **kwargs):
+def pipe_flow(phase: Literal["liquid", "gas"], flow_rate_gpm=None, ...):
     if phase == "liquid":
         return calculate_pipe_pressure_drop(**filtered_kwargs)
     else:
@@ -273,9 +276,10 @@ def pipe_flow(phase: Literal["liquid", "gas"], **kwargs):
 #### Property Resolution Hierarchy
 1. User-specified values (highest priority)
 2. Mixture calculations via thermo.Mixture (for gas_composition_mol)
-3. FluidProp/CoolProp lookup (primary source)
-4. thermo.Chemical fallback (for NaN or missing properties)
-5. Engineering defaults with warnings
+3. CoolProp via CachedFluidProperties (primary source)
+4. FluidProp lookup (optional secondary — `pip install fluids-mcp[fluidprop]`)
+5. thermo.Chemical fallback (for NaN or missing properties)
+6. Engineering defaults gated on `allow_property_defaults=True` (gas tools only)
 
 #### Fluid Name Aliasing
 Common names are automatically mapped:
@@ -286,7 +290,7 @@ Common names are automatically mapped:
 - "biogas" → Use gas_composition_mol instead
 
 ### Performance Optimizations
-- **Vectorized Calculations**: NumPy arrays for parameter sweeps
+- **Parameter Sweeps**: NumPy linspace for sweep ranges, iterative evaluation
 - **Property Caching**: Avoid redundant thermodynamic calculations
 - **Lazy Imports**: Optional dependencies loaded on demand
 - **Parameter Filtering**: inspect.signature() ensures valid parameters
@@ -326,7 +330,7 @@ pipe_flow(
     inlet_pressure=101325,
     gas_composition_mol={"CH4": 0.65, "CO2": 0.35},
     fittings=[
-        {"type": "elbow_90_long_radius", "quantity": 10},
+        {"type": "90_elbow", "quantity": 10},
         {"type": "gate_valve", "quantity": 1}
     ]
 )
@@ -357,7 +361,7 @@ control_valve(
     inlet_pressure_psi=100,
     outlet_pressure_psi=50,
     fluid_name="natural gas",
-    temperature_c=15,
+    inlet_temperature_c=15,
     valve_type="globe"
 )
 ```
@@ -405,13 +409,13 @@ pytest tests/ --cov=tools --cov=utils --cov=omnitools --cov-report=term-missing
 
 ### Integration Tests
 ```bash
-python tests/integration/test_mcp_server.py
+pytest tests/test_integration.py -v
 ```
 
 ## Version History
 
 ### v3.0.0 (Current)
-- **Architecture**: Refactored 16 tools into 6 discriminator-based omnitools
+- **Architecture**: Refactored 16 tools into 8 discriminator-based omnitools
 - **Mixture Support**: Full gas composition handling via thermo.Mixture
 - **Fallback Strategy**: Automatic CoolProp → thermo.Chemical failover
 - **Fluid Aliasing**: Common name mapping system

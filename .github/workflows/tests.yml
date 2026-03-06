@@ -32,16 +32,20 @@ jobs:
       run: |
         pip install -e .
 
-    - name: Verify test collection
+    - name: Smoke test - entrypoint import
       run: |
-        python -m pytest tests/ --collect-only -v 2>&1 || echo "Collection may have issues"
-        python -c "import tools; print('Tools import OK')" || echo "Tools import FAILED"
+        python -c "from server import main; print('Entrypoint OK')"
+        python -c "from omnitools.pipe_flow import pipe_flow; print('Omnitools OK')"
 
-    - name: List test files
+    - name: Smoke test - wheel build and install
       run: |
-        python -c "import os; print([f for f in os.listdir('tests') if f.endswith('.py')])"
-        python -c "print(open('tests/__init__.py').read())"
+        pip install build
+        python -m build --wheel
+        pip install dist/*.whl --force-reinstall --no-deps
+        python -c "from server import main; print('Wheel entrypoint OK')"
+        python -c "import shutil; assert shutil.which('fluids-mcp'), 'Console script not found in PATH'; print('Console script installed OK')"
+        pip install -e .
 
     - name: Run tests with coverage
       run: |
-        python -m pytest tests/test_sanity.py tests/test_integration.py tests/test_tools_integration.py -v --cov=tools --cov=utils --cov=pydraulics --cov-report=term-missing --ignore-glob="*__pycache__*"
+        python -m pytest tests/ -v --cov=tools --cov=utils --cov=pydraulics --cov=omnitools --cov-report=term-missing --ignore-glob="*__pycache__*"

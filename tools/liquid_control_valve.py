@@ -9,12 +9,9 @@ import fluids.control_valve # Explicitly import submodule used
 
 # Import shared utilities
 from utils.constants import (
-    GPM_to_M3S, INCH_to_M, FT_to_M, PSI_to_PA, 
-    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS, DEG_C_to_K
+    GPM_to_M3S, INCH_to_M, PSI_to_PA,
+    LBFT3_to_KGM3, CENTIPOISE_to_PAS
 )
-from utils.helpers import get_fitting_K
-from utils.import_helpers import FLUIDPROP_AVAILABLE, FluidProperties, FLUID_SELECTION, COOLPROP_AVAILABLE, CP
-from utils.fluid_aliases import map_fluid_name
 
 # Configure logging
 logger = logging.getLogger("fluids-mcp.calculate_liquid_control_valve")
@@ -144,67 +141,36 @@ def calculate_liquid_control_valve(
               results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
               prop_lookup_success = True
         elif fluid_name is not None and temperature_c is not None:
-            if FLUIDPROP_AVAILABLE and FLUID_SELECTION is not None and FluidProperties is not None:
-                try: # Fluid property lookup
-                    # First try mapping common aliases
-                    mapped_fluid_name = map_fluid_name(fluid_name)
-
-                    try:
-                        valid_fluids = [f[0] for f in FLUID_SELECTION if f is not None and hasattr(f, '__getitem__')]
-                    except (TypeError, IndexError):
-                        valid_fluids = []
-                    actual_fluid_name = mapped_fluid_name
-                    
-                    # Handle incompressible fluids (glycols)
-                    if mapped_fluid_name.startswith('INCOMP::'):
-                        # For incompressible fluids, use directly with CoolProp
-                        actual_fluid_name = mapped_fluid_name
-                        # Note: FluidProperties may not handle INCOMP:: fluids well
-                        # This is a known limitation
-                    elif not valid_fluids or mapped_fluid_name not in valid_fluids:
-                        fluid_lower = mapped_fluid_name.lower()
-                        match = next((f for f in valid_fluids if f.lower() == fluid_lower), None)
-                        if match: actual_fluid_name = match
-                        else: raise ValueError(f"Fluid '{fluid_name}' (mapped to '{mapped_fluid_name}') not found.")
-
-
-                    p_bar = pressure_bar if pressure_bar is not None else 1.01325 # Default pressure
-                    fluid_props = FluidProperties(coolprop_name=actual_fluid_name, T_in_deg_C=temperature_c, P_in_bar=p_bar)
-                    local_fluid_density = float(fluid_props.rho[0])
-                    local_fluid_viscosity = float(fluid_props.eta[0])
-                    fluid_info = { # Store details
-                        "name_used": actual_fluid_name, "temperature_c": temperature_c, "pressure_bar": p_bar,
+            try:
+                from utils.resolve_properties import resolve_liquid_properties
+                p_bar = pressure_bar if pressure_bar is not None else 1.01325
+                props = resolve_liquid_properties(fluid_name, temperature_c, p_bar)
+                if props is not None:
+                    local_fluid_density = props.density
+                    local_fluid_viscosity = props.viscosity
+                    fluid_info = {
+                        "name_used": fluid_name, "temperature_c": temperature_c, "pressure_bar": p_bar,
                         "density_kgm3": local_fluid_density, "viscosity_pas": local_fluid_viscosity
                     }
-                    results_log.append(f"Looked up density/viscosity for {actual_fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                    results_log.append(f"Properties via {props.source} for {fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                    results_log.extend(props.log)
                     prop_lookup_success = True
-
-
-                    # Attempt Psat/Pc lookup ONLY if base props succeeded & CoolProp available
-                    if COOLPROP_AVAILABLE:
-                        try:
-                            temp_k = temperature_c + DEG_C_to_K
-                            # Use saturation pressure at the given temperature
-                            local_Psat = CP.PropsSI('P', 'T', temp_k, 'Q', 0, actual_fluid_name)
-                            fluid_info["saturation_pressure_pa"] = local_Psat
-                            results_log.append(f"Looked up saturation pressure ({local_Psat:.2f} Pa).")
-                        except Exception as psat_e:
-                            error_log.append(f"Warning: Could not look up Psat for {actual_fluid_name}: {psat_e}")
-                        try:
-                            # Critical pressure might depend less on T/P context, use generic lookup
-                            local_Pc = CP.PropsSI('PCRIT', actual_fluid_name)
-                            fluid_info["critical_pressure_pa"] = local_Pc
-                            results_log.append(f"Looked up critical pressure ({local_Pc:.2f} Pa).")
-                        except Exception as pc_e:
-                                error_log.append(f"Warning: Could not look up Pc for {actual_fluid_name}: {pc_e}")
-
-                except Exception as fluid_lookup_e:
+                    if props.vapor_pressure is not None:
+                        local_Psat = props.vapor_pressure
+                        fluid_info["saturation_pressure_pa"] = local_Psat
+                        results_log.append(f"Vapor pressure: {local_Psat:.2f} Pa")
+                    if props.critical_pressure is not None:
+                        local_Pc = props.critical_pressure
+                        fluid_info["critical_pressure_pa"] = local_Pc
+                        results_log.append(f"Critical pressure: {local_Pc:.2f} Pa")
+                else:
                     local_fluid_density = None
                     local_fluid_viscosity = None
-                    error_log.append(f"Failed base fluid property lookup for {fluid_name} at {temperature_c}°C: {fluid_lookup_e}")
-                    prop_lookup_success = False
-            else:
-                error_log.append("Fluid property lookup skipped: fluidprop package not available.")
+                    error_log.append(f"Failed fluid property lookup for {fluid_name} at {temperature_c}°C: all backends failed")
+            except Exception as fluid_lookup_e:
+                local_fluid_density = None
+                local_fluid_viscosity = None
+                error_log.append(f"Failed base fluid property lookup for {fluid_name} at {temperature_c}°C: {fluid_lookup_e}")
         else:
             # This error is raised only if density/viscosity cannot be determined
             error_log.append("Missing inputs for fluid density/viscosity: Need (SI pair) OR (Imperial pair) OR (fluid_name AND temperature_c).")
