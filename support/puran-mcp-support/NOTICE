@@ -1,0 +1,11 @@
+Puran Water MCP release 0.1.0. Original project code retains its LICENSE.
+
+Separately licensed upstream code and data are governed by the notices below, not relicensed by the wrapper.
+
+Required upstream copyright and attribution are reproduced verbatim. No endorsement is implied.
+
+QSDsan-derived biology models, stoichiometric resources and shared kinetic contracts: https://github.com/QSD-Group/QSDsan — University of Illinois/NCSA; notice retained.
+
+WaterTAP-derived model adapters: https://github.com/watertap-org/watertap — BSD-style WaterTAP license including its enhancement clause; notice retained.
+
+Thermodynamic reference constants sourced from PHREEQC data retain the USGS User Rights Notice and PhreeqPython distribution notice. Full databases are not bundled in this support package. Original distribution: https://github.com/phreeqc-dev/phreeqc3 .

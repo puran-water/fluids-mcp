@@ -1,0 +1,755 @@
+"""
+Pipe pressure drop calculation tool.
+
+This module provides a tool to calculate pressure drop in pipes with various fluids and fittings.
+"""
+
+import json
+import math
+import logging
+import fluids
+import fluids.core
+import fluids.friction
+from typing import List, Dict, Optional, Union, Any
+
+from fluids_mcp.errors import CalculationError, FittingKError
+
+# Import shared utilities
+from fluids_mcp.utils.constants import (
+    GPM_to_M3S, INCH_to_M, FT_to_M, PSI_to_PA,
+    LBFT3_to_KGM3, CENTIPOISE_to_PAS, DEFAULT_ROUGHNESS
+)
+from fluids_mcp.utils.helpers import get_fitting_K, get_pipe_roughness, validate_fitting_type
+
+# Configure logging
+logger = logging.getLogger("fluids-mcp.pipe_pressure_drop")
+
+
+def _json_error(code: str, message: str, log_messages: list, details: Optional[dict] = None) -> str:
+    error = CalculationError(code, message, details=details)
+    return json.dumps(
+        {
+            "error_code": error.code,
+            "error": error.message,
+            "errors": [error.to_public_dict()],
+            "log": log_messages,
+        },
+        allow_nan=False,
+    )
+
+
+def _numeric_detail(value: Any) -> Any:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return value if math.isfinite(float(value)) else repr(value)
+    return value
+
+
+def _validate_finite_number(name: str, value: Optional[float], log_messages: list) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(float(value)):
+        return _json_error(
+            "INVALID_NUMERIC_INPUT",
+            f"{name} must be finite.",
+            log_messages,
+            details={name: _numeric_detail(value)},
+        )
+    return None
+
+
+def _validate_positive_number(name: str, value: Optional[float], log_messages: list) -> Optional[str]:
+    finite_error = _validate_finite_number(name, value, log_messages)
+    if finite_error is not None or value is None:
+        return finite_error
+    if value <= 0:
+        return _json_error(
+            "INVALID_NUMERIC_INPUT",
+            f"{name} must be positive.",
+            log_messages,
+            details={name: value},
+        )
+    return None
+
+
+def _validate_nonnegative_number(name: str, value: Optional[float], log_messages: list) -> Optional[str]:
+    finite_error = _validate_finite_number(name, value, log_messages)
+    if finite_error is not None or value is None:
+        return finite_error
+    if value < 0:
+        return _json_error(
+            "INVALID_NUMERIC_INPUT",
+            f"{name} must be non-negative.",
+            log_messages,
+            details={name: value},
+        )
+    return None
+
+
+def _resolve_pipe_roughness(pipe_roughness, material, results_log, error_log):
+    if pipe_roughness is not None:
+        results_log.append("Used provided SI pipe_roughness.")
+        return pipe_roughness
+    if material is not None:
+        roughness, source = get_pipe_roughness(material=material, warnings=error_log)
+        results_log.append(f"Looked up roughness for material '{material}': {roughness} m ({source}).")
+        return roughness
+    results_log.append("Used default pipe_roughness.")
+    return DEFAULT_ROUGHNESS
+
+
+def calculate_total_pressure_drop(flow_rate, pipe_diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
+    """Helper function to calculate total pressure drop for given parameters"""
+    area = math.pi * (pipe_diameter / 2) ** 2
+    velocity = flow_rate / area
+
+    Re = fluids.core.Reynolds(V=velocity, D=pipe_diameter, rho=fluid_density, mu=fluid_viscosity)
+    fd = fluids.friction.friction_factor(Re=Re, eD=pipe_roughness / pipe_diameter)
+    dP_straight = fd * (pipe_length / pipe_diameter) * (fluid_density * velocity**2 / 2.0)
+
+    # Calculate fittings pressure drop
+    K_total = 0
+    for fitting in fittings_list:
+        fitting_type = fitting.get("type", "").lower()
+        quantity = fitting.get("quantity", 1)
+        K_value_provided = fitting.get("K_value")
+
+        if K_value_provided is not None:
+            K_fitting = float(K_value_provided)
+        else:
+            K_fitting = get_fitting_K(fitting_type, pipe_diameter, Re, flow_rate)
+
+        K_total += K_fitting * quantity
+
+    dP_fittings = fluids.dP_from_K(K=K_total, rho=fluid_density, V=velocity)
+    return dP_straight + dP_fittings
+
+def solve_for_flow_rate(target_pressure_drop, pipe_diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
+    """Solve for flow rate given target pressure drop using numerical methods"""
+    from scipy.optimize import brentq
+
+    def pressure_drop_error(flow_rate):
+        if flow_rate <= 0:
+            return float('inf')
+        try:
+            calculated_dp = calculate_total_pressure_drop(
+                flow_rate, pipe_diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
+            )
+            return calculated_dp - target_pressure_drop
+        except FittingKError:
+            raise
+        except Exception as e:
+            logger.debug("Calculation failed at flow_rate=%s: %s", flow_rate, e)
+            return float('inf')
+
+    # Dynamic bounds based on velocity limits (0.1 to 10 m/s typical)
+    import math
+    area = math.pi * (pipe_diameter / 2) ** 2
+    flow_min = max(1e-8, 0.01 * area)   # Very slow flow (0.01 m/s)
+    flow_max = min(100.0, 30.0 * area)  # Fast flow (30 m/s - allow high for gases)
+
+    # Find bounds where function changes sign
+    try:
+        result = brentq(pressure_drop_error, flow_min, flow_max, xtol=1e-8)
+        return result
+    except ValueError:
+        # If brentq fails, try expanding bounds geometrically and retry
+        from scipy.optimize import root_scalar
+        try:
+            # Use secant method with initial bracketing attempt
+            result = root_scalar(pressure_drop_error, method='secant', x0=flow_min, x1=flow_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except FittingKError:
+            raise
+        except Exception:
+            pass
+
+        # Final fallback: minimize squared error but validate residual
+        from scipy.optimize import minimize_scalar
+        result = minimize_scalar(lambda q: pressure_drop_error(q)**2, bounds=(flow_min, flow_max), method='bounded')
+        if result.success:
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:  # Within 5% tolerance
+                return result.x
+        raise ValueError("Failed to converge on flow rate solution - no valid root found in search range")
+
+def solve_for_diameter(target_pressure_drop, flow_rate, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
+    """Solve for pipe diameter given target pressure drop using numerical methods"""
+    from scipy.optimize import brentq
+
+    def pressure_drop_error(diameter):
+        if diameter <= 0:
+            return float('inf')
+        try:
+            calculated_dp = calculate_total_pressure_drop(
+                flow_rate, diameter, pipe_length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
+            )
+            return calculated_dp - target_pressure_drop
+        except FittingKError:
+            raise
+        except Exception as e:
+            logger.debug("Calculation failed at diameter=%s: %s", diameter, e)
+            return float('inf')
+
+    # Dynamic bounds based on velocity limits
+    import math
+    # For velocity 0.1 to 30 m/s, D = sqrt(4Q / (pi*V))
+    D_min = max(0.001, math.sqrt(4 * flow_rate / (math.pi * 30.0)))  # Fast flow -> small diameter
+    D_max = min(3.0, math.sqrt(4 * flow_rate / (math.pi * 0.05)))    # Slow flow -> large diameter
+
+    try:
+        result = brentq(pressure_drop_error, D_min, D_max, xtol=1e-8)
+        return result
+    except ValueError:
+        from scipy.optimize import root_scalar, minimize_scalar
+        try:
+            result = root_scalar(pressure_drop_error, method='secant', x0=D_min, x1=D_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except FittingKError:
+            raise
+        except Exception:
+            pass
+
+        result = minimize_scalar(lambda d: pressure_drop_error(d)**2, bounds=(D_min, D_max), method='bounded')
+        if result.success:
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:
+                return result.x
+        raise ValueError("Failed to converge on diameter solution - no valid root found")
+
+def solve_for_length(target_pressure_drop, flow_rate, pipe_diameter, fluid_density, fluid_viscosity, pipe_roughness, fittings_list):
+    """Solve for pipe length given target pressure drop using numerical methods"""
+    from scipy.optimize import brentq
+
+    def pressure_drop_error(length):
+        if length <= 0:
+            return float('inf')
+        try:
+            calculated_dp = calculate_total_pressure_drop(
+                flow_rate, pipe_diameter, length, fluid_density, fluid_viscosity, pipe_roughness, fittings_list
+            )
+            return calculated_dp - target_pressure_drop
+        except FittingKError:
+            raise
+        except Exception as e:
+            logger.debug("Calculation failed at length=%s: %s", length, e)
+            return float('inf')
+
+    # Length bounds - keep simple as length doesn't have velocity-based constraints
+    L_min = 0.001   # 1 mm
+    L_max = 100000.0 # 100 km for long pipelines
+
+    try:
+        result = brentq(pressure_drop_error, L_min, L_max, xtol=1e-8)
+        return result
+    except ValueError:
+        from scipy.optimize import root_scalar, minimize_scalar
+        try:
+            result = root_scalar(pressure_drop_error, method='secant', x0=L_min, x1=L_max, xtol=1e-8)
+            if result.converged and abs(pressure_drop_error(result.root)) < target_pressure_drop * 0.01:
+                return result.root
+        except FittingKError:
+            raise
+        except Exception:
+            pass
+
+        result = minimize_scalar(lambda l: pressure_drop_error(l)**2, bounds=(L_min, L_max), method='bounded')
+        if result.success:
+            residual = abs(pressure_drop_error(result.x))
+            if residual < target_pressure_drop * 0.05:
+                return result.x
+        raise ValueError("Failed to converge on length solution - no valid root found")
+
+def calculate_pipe_pressure_drop(
+    # --- Core SI Inputs (still supported) ---
+    flow_rate: Optional[float] = None,           # Flow rate in m³/s
+    pipe_diameter: Optional[float] = None,       # Pipe inner diameter in m
+    pipe_length: Optional[float] = None,         # Pipe length in m
+    fluid_density: Optional[float] = None,       # Fluid density in kg/m³
+    fluid_viscosity: Optional[float] = None,     # Fluid dynamic viscosity in Pa·s
+    pipe_roughness: Optional[float] = None,      # Pipe roughness in m
+
+    # --- Alternative Unit Inputs ---
+    flow_rate_gpm: Optional[float] = None,       # Flow rate in US GPM
+    pipe_diameter_in: Optional[float] = None,    # Pipe inner diameter in inches
+    pipe_length_ft: Optional[float] = None,      # Pipe length in feet
+    fluid_density_lbft3: Optional[float] = None, # Fluid density in lb/ft³
+    fluid_viscosity_cp: Optional[float] = None,  # Fluid dynamic viscosity in centipoise
+
+    # --- Property Lookup Inputs ---
+    fluid_name: Optional[str] = None,            # e.g., "Water", "Air"
+    temperature_c: Optional[float] = None,       # Temperature in Celsius (for property lookup)
+    pressure_bar: Optional[float] = None,        # Pressure in bar (for property lookup, default ~1 atm)
+    nominal_size_in: Optional[float] = None,     # Nominal pipe size in inches
+    schedule: str = "40",                        # Pipe schedule
+    material: Optional[str] = None,              # e.g., "Steel", "PVC"
+
+    # --- Pressure Drop / Design Parameters ---
+    pressure_drop: Optional[float] = None,          # Total pressure drop in Pa
+    pressure_drop_psi: Optional[float] = None,      # Total pressure drop in psi
+
+    # --- Fittings ---
+    fittings: List[Dict[str, Union[str, int, float]]] = None  # List of fittings with type, quantity, and optional K_value
+) -> str:
+    """Calculate the pressure drop through straight pipe and fittings with flexible input options.
+
+    This function accepts multiple input formats for flexibility:
+    1. SI units (direct inputs)
+    2. Imperial units (with automatic conversion)
+    3. Property lookups based on standard materials, fluids, and pipe sizes
+
+    Requirements:
+    - Must provide either flow_rate (SI) OR flow_rate_gpm
+    - Must provide either pipe_diameter (SI) OR pipe_diameter_in OR nominal_size_in with schedule
+    - Must provide either pipe_length (SI) OR pipe_length_ft
+    - Must provide either (fluid_density AND fluid_viscosity) OR (fluid_density_lbft3 AND fluid_viscosity_cp)
+      OR (fluid_name AND temperature_c)
+    - Roughness is optional with defaults available
+
+    Args:
+        flow_rate: Optional - Flow rate in m³/s
+        pipe_diameter: Optional - Pipe inner diameter in m
+        pipe_length: Optional - Pipe length in m
+        fluid_density: Optional - Fluid density in kg/m³
+        fluid_viscosity: Optional - Fluid viscosity in Pa·s
+        pipe_roughness: Optional - Pipe roughness in m
+        flow_rate_gpm: Optional - Flow rate in US GPM
+        pipe_diameter_in: Optional - Pipe inner diameter in inches
+        pipe_length_ft: Optional - Pipe length in feet
+        fluid_density_lbft3: Optional - Fluid density in lb/ft³
+        fluid_viscosity_cp: Optional - Fluid dynamic viscosity in centipoise
+        fluid_name: Optional - Name of the fluid (e.g., "Water", "Air")
+        temperature_c: Optional - Temperature in Celsius (for property lookup)
+        pressure_bar: Optional - Pressure in bar (for property lookup)
+        nominal_size_in: Optional - Nominal pipe size in inches
+        schedule: Pipe schedule (default: "40")
+        material: Optional - Pipe material name (e.g., "Steel", "PVC")
+        fittings: Optional - List of fittings, each with 'type' and 'quantity', and optionally 'K_value'.
+                 Types include: 90_elbow, 45_elbow, tee_run_through, tee_branch_flow,
+                 gate_valve, globe_valve, check_valve_swing, ball_valve, butterfly_valve,
+                 entrance_sharp, exit_normal, etc.
+
+    Returns:
+        Detailed pressure drop analysis including head loss with unit conversions
+    """
+
+    results_log = [] # To track how values were obtained
+    error_log = []
+
+    try:
+        # 1. Resolve Flow Rate (SI)
+        local_flow_rate = None
+        if flow_rate is not None:
+            local_flow_rate = flow_rate
+            results_log.append("Used provided SI flow_rate.")
+        elif flow_rate_gpm is not None:
+            local_flow_rate = flow_rate_gpm * GPM_to_M3S
+            results_log.append(f"Converted flow_rate from {flow_rate_gpm} GPM.")
+        else:
+            results_log.append("No flow_rate provided; it may be solved from pressure_drop.")
+
+        # 2. Resolve Pipe Length (SI)
+        local_pipe_length = None
+        if pipe_length is not None:
+            local_pipe_length = pipe_length
+            results_log.append("Used provided SI pipe_length.")
+        elif pipe_length_ft is not None:
+            local_pipe_length = pipe_length_ft * FT_to_M
+            results_log.append(f"Converted pipe_length from {pipe_length_ft} ft.")
+        else:
+            results_log.append("No pipe_length provided; it may be solved from pressure_drop.")
+
+        # 3. Resolve Pipe Diameter & Roughness (SI)
+        local_pipe_diameter = None
+        local_pipe_roughness = None
+        pipe_info = {} # Store details from lookup
+
+        if pipe_diameter is not None:
+            local_pipe_diameter = pipe_diameter
+            results_log.append("Used provided SI pipe_diameter.")
+            local_pipe_roughness = _resolve_pipe_roughness(pipe_roughness, material, results_log, error_log)
+
+        elif pipe_diameter_in is not None:
+            local_pipe_diameter = pipe_diameter_in * INCH_to_M
+            results_log.append(f"Converted pipe_diameter from {pipe_diameter_in} inches.")
+            local_pipe_roughness = _resolve_pipe_roughness(pipe_roughness, material, results_log, error_log)
+
+        elif nominal_size_in is not None:
+            # Use fluids.piping.nearest_pipe to get dimensions
+            # For pipe dimension lookup failure
+            try:
+                NPS, Di, Do, t = fluids.piping.nearest_pipe(NPS=nominal_size_in, schedule=schedule)
+                local_pipe_diameter = Di
+                pipe_info = {"NPS_in": NPS, "schedule": schedule, "Do_m": Do, "t_m": t}
+                results_log.append(f"Looked up pipe dimensions for NPS {nominal_size_in} Sch {schedule}.")
+
+                local_pipe_roughness = _resolve_pipe_roughness(pipe_roughness, material, results_log, error_log)
+                pipe_info["roughness_used_m"] = local_pipe_roughness
+            except Exception as pipe_lookup_e:
+                error_log.append(f"Failed to look up pipe NPS {nominal_size_in} Sch {schedule}: {pipe_lookup_e}")
+                local_pipe_diameter = None  # Explicitly set to None on failure
+                local_pipe_roughness = None # Explicitly set to None on failure
+        else:
+            results_log.append("No pipe_diameter provided; it may be solved from pressure_drop.")
+
+        # 4. Resolve Fluid Properties (SI)
+        local_fluid_density = None
+        local_fluid_viscosity = None
+
+        if fluid_density is not None and fluid_viscosity is not None:
+            local_fluid_density = fluid_density
+            local_fluid_viscosity = fluid_viscosity
+            results_log.append("Used provided SI fluid density and viscosity.")
+        elif fluid_density_lbft3 is not None and fluid_viscosity_cp is not None:
+             local_fluid_density = fluid_density_lbft3 * LBFT3_to_KGM3
+             local_fluid_viscosity = fluid_viscosity_cp * CENTIPOISE_to_PAS
+             results_log.append(f"Converted density from {fluid_density_lbft3} lb/ft³ and viscosity from {fluid_viscosity_cp} cP.")
+        elif fluid_name is not None and temperature_c is not None:
+            try:
+                from fluids_mcp.utils.resolve_properties import resolve_liquid_properties
+                p_bar = pressure_bar if pressure_bar is not None else 1.01325
+                props = resolve_liquid_properties(fluid_name, temperature_c, p_bar)
+                if props is not None:
+                    local_fluid_density = props.density
+                    local_fluid_viscosity = props.viscosity
+                    results_log.append(f"Properties via {props.source} for {fluid_name} at {temperature_c}°C, {p_bar} bar.")
+                    results_log.extend(props.log)
+                else:
+                    error_log.append(f"Failed to look up fluid properties for {fluid_name} at {temperature_c}°C: all backends failed")
+                    local_fluid_density = None
+                    local_fluid_viscosity = None
+            except Exception as fluid_lookup_e:
+                error_log.append(f"Failed to look up fluid properties for {fluid_name} at {temperature_c}°C: {fluid_lookup_e}")
+                local_fluid_density = None
+                local_fluid_viscosity = None
+        else:
+            error_log.append("Missing required inputs for fluid properties: (fluid_density AND fluid_viscosity) OR (fluid_density_lbft3 AND fluid_viscosity_cp) OR (fluid_name AND temperature_c).")
+
+        # 5. Resolve Pressure Drop (SI)
+        local_pressure_drop = None
+        if pressure_drop is not None:
+            local_pressure_drop = pressure_drop
+            results_log.append("Used provided SI pressure_drop.")
+        elif pressure_drop_psi is not None:
+            local_pressure_drop = pressure_drop_psi * PSI_to_PA
+            results_log.append(f"Converted pressure_drop from {pressure_drop_psi} psi.")
+        # else: to be solved for or calculated
+        fittings_list = fittings if fittings else []
+        for fitting in fittings_list:
+            if fitting.get("K_value") is None:
+                validate_fitting_type(fitting.get("type"))
+
+        # 6. Determine solve_for variable
+        specified_vars = {
+            'flow_rate': local_flow_rate,
+            'pipe_diameter': local_pipe_diameter,
+            'pipe_length': local_pipe_length,
+            'pressure_drop': local_pressure_drop
+        }
+        unknown_vars = [k for k, v in specified_vars.items() if v is None]
+
+        if len(unknown_vars) == 0:
+            # All variables specified - just calculate and verify
+            solve_for = None
+            results_log.append("All primary variables specified - calculating for verification.")
+        elif len(unknown_vars) == 1:
+            solve_for = unknown_vars[0]
+            results_log.append(f"Solving for: {solve_for}")
+        else:
+            error_log.append(f"Too many unknown variables. Specify 3 of 4 primary variables: {list(specified_vars.keys())}. Unknown: {unknown_vars}")
+
+        # --- Check for any errors before proceeding ---
+        if error_log:
+             # If critical inputs are missing, return error early
+             missing_critical = any(e.startswith("Missing required input") or e.startswith("Too many unknown variables") for e in error_log)
+             if missing_critical:
+                 return json.dumps({"errors": error_log, "log": results_log})
+             # Otherwise, proceed but include warnings
+
+        # --- Core Calculation Logic (using resolved local_ SI variables) ---
+        # Check critical variables (excluding the one we're solving for)
+        critical_base_vars = [local_fluid_density, local_fluid_viscosity, local_pipe_roughness]
+        if solve_for != 'flow_rate' and local_flow_rate is None:
+            critical_base_vars.append(local_flow_rate)
+        if solve_for != 'pipe_diameter' and local_pipe_diameter is None:
+            critical_base_vars.append(local_pipe_diameter)
+        if solve_for != 'pipe_length' and local_pipe_length is None:
+            critical_base_vars.append(local_pipe_length)
+        if solve_for != 'pressure_drop' and local_pressure_drop is None and solve_for is not None:
+            critical_base_vars.append(local_pressure_drop)
+
+        if any(v is None for v in critical_base_vars):
+            return json.dumps({"errors": ["Critical input parameter resolution failed."] + error_log, "log": results_log})
+
+        numeric_errors = [
+            _validate_positive_number("fluid_density", local_fluid_density, results_log),
+            _validate_positive_number("fluid_viscosity", local_fluid_viscosity, results_log),
+            _validate_nonnegative_number("pipe_roughness", local_pipe_roughness, results_log),
+        ]
+        if local_flow_rate is not None:
+            numeric_errors.append(_validate_positive_number("flow_rate", local_flow_rate, results_log))
+        if local_pipe_diameter is not None:
+            numeric_errors.append(_validate_positive_number("pipe_diameter", local_pipe_diameter, results_log))
+        if local_pipe_length is not None:
+            numeric_errors.append(_validate_positive_number("pipe_length", local_pipe_length, results_log))
+        if local_pressure_drop is not None:
+            numeric_errors.append(_validate_positive_number("pressure_drop", local_pressure_drop, results_log))
+        for numeric_error in numeric_errors:
+            if numeric_error is not None:
+                return numeric_error
+
+        # --- Solving Logic ---
+        if solve_for is not None:
+            try:
+                if solve_for == 'pressure_drop':
+                    # Standard calculation - no solving needed
+                    pass
+                elif solve_for == 'flow_rate':
+                    # Solve for flow rate given pressure drop
+                    local_flow_rate = solve_for_flow_rate(
+                        local_pressure_drop, local_pipe_diameter, local_pipe_length,
+                        local_fluid_density, local_fluid_viscosity, local_pipe_roughness, fittings_list
+                    )
+                    results_log.append(f"Solved flow_rate = {local_flow_rate:.6f} m³/s")
+                elif solve_for == 'pipe_diameter':
+                    # Solve for diameter given pressure drop and flow rate
+                    local_pipe_diameter = solve_for_diameter(
+                        local_pressure_drop, local_flow_rate, local_pipe_length,
+                        local_fluid_density, local_fluid_viscosity, local_pipe_roughness, fittings_list
+                    )
+                    results_log.append(f"Solved pipe_diameter = {local_pipe_diameter:.6f} m")
+                elif solve_for == 'pipe_length':
+                    # Solve for length given pressure drop, flow rate, and diameter
+                    local_pipe_length = solve_for_length(
+                        local_pressure_drop, local_flow_rate, local_pipe_diameter,
+                        local_fluid_density, local_fluid_viscosity, local_pipe_roughness, fittings_list
+                    )
+                    results_log.append(f"Solved pipe_length = {local_pipe_length:.3f} m")
+            except FittingKError:
+                raise
+            except Exception as solve_error:
+                error_log.append(f"Failed to solve for {solve_for}: {solve_error}")
+                return json.dumps({"errors": error_log, "log": results_log})
+
+        for name, value in {
+            "flow_rate": local_flow_rate,
+            "pipe_diameter": local_pipe_diameter,
+            "pipe_length": local_pipe_length,
+            "fluid_density": local_fluid_density,
+            "fluid_viscosity": local_fluid_viscosity,
+            "pipe_roughness": local_pipe_roughness,
+        }.items():
+            allow_zero = name == "pipe_roughness"
+            numeric_error = (
+                _validate_nonnegative_number(name, value, results_log)
+                if allow_zero
+                else _validate_positive_number(name, value, results_log)
+            )
+            if numeric_error is not None:
+                return numeric_error
+
+        area = math.pi * (local_pipe_diameter/2)**2
+        if area == 0:
+             return _json_error(
+                 "INVALID_NUMERIC_INPUT",
+                 "Pipe diameter resolved to zero.",
+                 results_log,
+                 details={"pipe_diameter": local_pipe_diameter},
+             )
+        velocity = local_flow_rate / area
+
+        Re = fluids.core.Reynolds(V=velocity, D=local_pipe_diameter, rho=local_fluid_density, mu=local_fluid_viscosity)
+        fd = fluids.friction.friction_factor(Re=Re, eD=local_pipe_roughness/local_pipe_diameter)
+        dP_straight = fd * (local_pipe_length / local_pipe_diameter) * (local_fluid_density * velocity**2 / 2.0)
+
+        # --- Fitting Calculation (using helper function) ---
+        K_total = 0
+        fitting_details = []
+        fittings_list = fittings if fittings else []
+
+        for fitting in fittings_list:
+             fitting_type = fitting.get("type", "").lower()
+             quantity = fitting.get("quantity", 1)
+             K_value_provided = fitting.get("K_value") # Explicit K
+             K_fitting = 0
+
+             if K_value_provided is not None:
+                 K_fitting = float(K_value_provided)
+                 fitting_details.append({"type": fitting_type, "quantity": quantity, "K_source": "Provided", "K_total": round(K_fitting * quantity, 4)})
+             else:
+                 # Use simplified fitting mapping via helper function
+                 K_fitting = get_fitting_K(fitting_type, local_pipe_diameter, Re, local_flow_rate)
+                 fitting_details.append({"type": fitting_type, "quantity": quantity, "K_source": "Calculated", "K_individual": round(K_fitting, 4), "K_total": round(K_fitting * quantity, 4)})
+
+             K_total += K_fitting * quantity
+
+        dP_fittings = fluids.dP_from_K(K=K_total, rho=local_fluid_density, V=velocity)
+        dP_total = dP_straight + dP_fittings
+        head_loss = dP_total / (local_fluid_density * 9.81) if local_fluid_density > 0 else 0
+
+        # --- Consolidate Results ---
+        final_result = {
+            "inputs_resolved": results_log,
+            "warnings": error_log if error_log else None, # Include warnings if any
+            "pipe_details": pipe_info if pipe_info else None,
+            # Solving Information
+            "solved_variable": solve_for if solve_for else None,
+            # Core Results
+            "flow_rate_m3s": round(local_flow_rate, 6),
+            "flow_rate_gpm": round(local_flow_rate / GPM_to_M3S, 2),
+            "pipe_diameter_m": round(local_pipe_diameter, 6),
+            "pipe_diameter_in": round(local_pipe_diameter / INCH_to_M, 4),
+            "pipe_length_m": round(local_pipe_length, 3),
+            "pipe_length_ft": round(local_pipe_length / FT_to_M, 1),
+            "reynolds_number": round(Re, 2),
+            "friction_factor": round(fd, 6),
+            "flow_velocity_m_s": round(velocity, 3),
+            "pressure_drop_straight_pipe_pa": round(dP_straight, 2),
+            "pressure_drop_fittings_pa": round(dP_fittings, 2),
+            "pressure_drop_total_pa": round(dP_total, 2),
+            "pressure_drop_total_psi": round(dP_total / PSI_to_PA, 3), # Example output conversion
+            "head_loss_m": round(head_loss, 3),
+            "head_loss_ft": round(head_loss / FT_to_M, 3), # Example output conversion
+            "fitting_details": fitting_details
+        }
+        # Remove null warnings/pipe_details if empty
+        if not final_result["warnings"]: del final_result["warnings"]
+        if not final_result["pipe_details"]: del final_result["pipe_details"]
+
+        return json.dumps(final_result, allow_nan=False)
+
+    except FittingKError as e:
+        logger.warning("Fitting K-value resolution failed: %s", e.message)
+        return _json_error(e.code, e.message, results_log, details=e.details)
+    except Exception as e:
+        logger.error(f"Error in calculate_pipe_pressure_drop: {e}", exc_info=True)
+        return _json_error(
+            "PIPE_PRESSURE_DROP_CALCULATION_FAILED",
+            f"Calculation error: {str(e)}",
+            results_log,
+            details={"errors_occurred": error_log},
+        )
+
+def pipe_pressure_drop_sweep(
+    variable: str,
+    start: float,
+    stop: float,
+    n: int,
+    # Base calculation parameters
+    flow_rate: Optional[float] = None,
+    pipe_diameter: Optional[float] = None,
+    pipe_length: Optional[float] = None,
+    fluid_density: Optional[float] = None,
+    fluid_viscosity: Optional[float] = None,
+    pipe_roughness: Optional[float] = None,
+    flow_rate_gpm: Optional[float] = None,
+    pipe_diameter_in: Optional[float] = None,
+    pipe_length_ft: Optional[float] = None,
+    fluid_density_lbft3: Optional[float] = None,
+    fluid_viscosity_cp: Optional[float] = None,
+    pressure_drop: Optional[float] = None,
+    pressure_drop_psi: Optional[float] = None,
+    fluid_name: Optional[str] = None,
+    temperature_c: Optional[float] = None,
+    pressure_bar: Optional[float] = None,
+    nominal_size_in: Optional[float] = None,
+    schedule: str = "40",
+    material: Optional[str] = None,
+    fittings: List[Dict[str, Union[str, int, float]]] = None
+) -> str:
+    """Parameter sweep for liquid pipe pressure drop analysis
+
+    Enables design optimization and parameter studies for pipe sizing.
+    Sweeps one variable while keeping others constant to analyze system behavior.
+
+    Args:
+        variable: Variable to sweep ('flow_rate', 'pipe_diameter', 'pipe_length', 'pressure_drop')
+        start: Start value for sweep
+        stop: Stop value for sweep
+        n: Number of points in sweep
+        **other_params: All other parameters from calculate_pipe_pressure_drop
+
+    Returns:
+        JSON string with sweep results as list of dictionaries
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return json.dumps({"error": "numpy required for sweep functionality"})
+
+    # Generate sweep values
+    sweep_values = np.linspace(start, stop, n)
+    results = []
+
+    # Build base parameters dictionary
+    base_kwargs = {
+        'flow_rate': flow_rate,
+        'pipe_diameter': pipe_diameter,
+        'pipe_length': pipe_length,
+        'fluid_density': fluid_density,
+        'fluid_viscosity': fluid_viscosity,
+        'pipe_roughness': pipe_roughness,
+        'flow_rate_gpm': flow_rate_gpm,
+        'pipe_diameter_in': pipe_diameter_in,
+        'pipe_length_ft': pipe_length_ft,
+        'fluid_density_lbft3': fluid_density_lbft3,
+        'fluid_viscosity_cp': fluid_viscosity_cp,
+        'pressure_drop': pressure_drop,
+        'pressure_drop_psi': pressure_drop_psi,
+        'fluid_name': fluid_name,
+        'temperature_c': temperature_c,
+        'pressure_bar': pressure_bar,
+        'nominal_size_in': nominal_size_in,
+        'schedule': schedule,
+        'material': material,
+        'fittings': fittings
+    }
+
+    # Remove None values
+    base_kwargs = {k: v for k, v in base_kwargs.items() if v is not None}
+
+    for value in sweep_values:
+        try:
+            # Set up parameters for this sweep point
+            kwargs = base_kwargs.copy()
+            kwargs[variable] = value
+
+            # Calculate
+            result_json = calculate_pipe_pressure_drop(**kwargs)
+            result = json.loads(result_json)
+
+            if 'errors' not in result or not result['errors']:
+                # Extract key results
+                row = {
+                    variable: round(value, 6),
+                    'flow_rate_m3s': result.get('flow_rate_m3s', None),
+                    'pipe_diameter_m': result.get('pipe_diameter_m', None),
+                    'pipe_length_m': result.get('pipe_length_m', None),
+                    'pressure_drop_total_pa': result.get('pressure_drop_total_pa', None),
+                    'pressure_drop_total_psi': result.get('pressure_drop_total_psi', None),
+                    'flow_velocity_m_s': result.get('flow_velocity_m_s', None),
+                    'reynolds_number': result.get('reynolds_number', None),
+                    'head_loss_m': result.get('head_loss_m', None),
+                    'solved_variable': result.get('solved_variable', None)
+                }
+                results.append(row)
+            else:
+                # Add row with errors
+                row = {variable: round(value, 6), 'error': str(result.get('errors', 'Unknown error'))}
+                results.append(row)
+
+        except Exception as e:
+            row = {variable: round(value, 6), 'error': str(e)}
+            results.append(row)
+
+    return json.dumps({
+        "sweep_variable": variable,
+        "sweep_range": {"start": start, "stop": stop, "n": n},
+        "results": results,
+        "summary": {
+            "total_points": len(results),
+            "successful_points": len([r for r in results if 'error' not in r]),
+            "failed_points": len([r for r in results if 'error' in r])
+        }
+    })

@@ -1,0 +1,9 @@
+Puran Water MCP release 0.1.0. Original project code retains its LICENSE.
+
+Separately licensed upstream code and data are governed by the notices below, not relicensed by the wrapper.
+
+Required upstream copyright and attribution are reproduced verbatim. No endorsement is implied.
+
+Bundled pydraulics routines: https://github.com/JuanGuerrero09/pydraulics — MIT; original notice in THIRD-PARTY-NOTICES/pydraulics-MIT.txt.
+
+The separately installable support package has its own LICENSE and NOTICE.

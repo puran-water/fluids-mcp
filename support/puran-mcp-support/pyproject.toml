@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "puran-mcp-support"
+version = "0.1.0"
+description = "Shared validation and engineering primitives for Puran Water MCP servers"
+requires-python = ">=3.12"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE", "THIRD-PARTY-NOTICES/**/*"]
+authors = [{name = "Puran Water"}]
+dependencies = ["pydantic>=2.0"]
+
+[project.optional-dependencies]
+thermal = ["numpy>=1.24", "scipy>=1.10", "fluids>=1.0.26", "ht>=1.0", "chemicals>=1.1"]
+chemistry = ["numpy>=1.24", "scipy>=1.10", "phreeqpython>=1.5.2", "periodictable>=1.6"]
+simulation = ["numpy>=1.24", "scipy>=1.10", "SALib>=1.4"]
+
+[project.urls]
+Homepage = "https://puranwater.com"
+Repository = "https://github.com/puran-water/fluids-mcp/tree/main/support/puran-mcp-support"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/puran_mcp_support"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE-TABLE.md", "RESOURCE-LICENSES.csv", "LICENSE", "NOTICE", "THIRD-PARTY-NOTICES", "pyproject.toml"]

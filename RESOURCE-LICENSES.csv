@@ -1,0 +1,3 @@
+file,license,source,disposition,sha256
+src/fluids_mcp/third_party/README.md,MIT,Puran Water,Original template or empty catalog; no private data,315462a84eeccd136701453f383f201b4385441a1e7df82f9d88bcc4a43ca852
+src/fluids_mcp/third_party/pydraulics-LICENSE.txt,MIT,https://github.com/JuanGuerrero09/pydraulics,Required upstream notice,3d5d3009cb6a8b4dbbc5e3bfc242bdbe0731da35255a97c49c9dd79081e1554f

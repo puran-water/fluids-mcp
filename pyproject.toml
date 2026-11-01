@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fluids-mcp"
+version = "0.1.0"
+description = "Pipe flow, pipe sizing, valve sizing, fluid properties and bounded parameter sweeps for AI engineering clients."
+requires-python = ">=3.12"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE*", "NOTICE", "THIRD-PARTY-NOTICES/**/*"]
+authors = [{name = "Puran Water"}]
+dependencies = [
+  "fastmcp>=3.0",
+  "httpx>=0.25.0",
+  "pydantic>=2.0.0",
+  "fluids>=1.0.26",
+  "scipy>=1.10.0",
+  "numpy>=1.24.0",
+  "sympy>=1.12.0",
+  "CoolProp>=6.4.1",
+  "thermo>=0.4.0",
+  "puran-mcp-support==0.1.0"
+]
+
+[project.scripts]
+fluids-mcp = "fluids_mcp.__main__:main"
+
+[project.urls]
+Homepage = "https://puranwater.com"
+Repository = "https://github.com/puran-water/fluids-mcp"
+Issues = "https://github.com/puran-water/fluids-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fluids_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "README.md", "LICENSE*", "NOTICE", "THIRD-PARTY-NOTICES", "LICENSE-TABLE.md", "SCAN-REPORT.md", "TEST-RESULTS.md", "HISTORICAL-QUALITY.md", "RESOURCE-LICENSES.csv", "KNOWN-ISSUES.md", "pyproject.toml"]
