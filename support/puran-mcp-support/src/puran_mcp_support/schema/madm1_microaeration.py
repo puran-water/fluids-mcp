@@ -4,7 +4,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from typing import Mapping, Optional
-from .expression import Expression, add, monod, multiply, noncompetitive_inhibition, power, smooth_positive
+from .expression import Expression, add, monod, multiply, named_factor, noncompetitive_inhibition, power, smooth_positive
 from .madm1_biokinetics import DERIVED_PARAMETERS, BiokineticProcessDefinition, ComponentContent, KineticParameterDefinition, _h2, _hill_ph, _nutrients, _s, _st
 from .madm1_organic_sulfur import MADM1_ORGANIC_SULFUR_EXTENSION
 from .madm1_sfe_kinetics import MADM1_SFE_DERIVED_SYMBOLS, MADM1_SFE_KERNEL, MW_S
@@ -117,7 +117,7 @@ O2_TRANSFER = MicroaerationProcessDefinition('O2_transfer', 77, multiply(_s('kL_
 _L1 = (_aerobic_uptake('aerobic_uptake_sugars', 78, 'S_su', 'X_su', 'k_su', 'K_su_aer', 'Y_su_aer', _i1(), 'Botheju 2009 Eq. 1'), _aerobic_uptake('aerobic_uptake_amino_acids', 79, 'S_aa', 'X_aa', 'k_aa', 'K_aa_aer', 'Y_aa_aer', _i1(), 'Botheju 2009 Eq. 2'), _aerobic_uptake('aerobic_uptake_LCFA', 80, 'S_fa', 'X_fa', 'k_fa', 'K_fa_aer', 'Y_fa_aer', _i2(), 'Botheju 2009 Eq. 3'), _aerobic_vfa('aerobic_uptake_valerate', 81, 'S_va', 'K_va_aer', 'Y_va_aer', 'Botheju 2010 Eq. 1'), _aerobic_vfa('aerobic_uptake_butyrate', 82, 'S_bu', 'K_bu_aer', 'Y_bu_aer', 'Botheju 2010 Eq. 1'), _aerobic_vfa('aerobic_uptake_propionate', 83, 'S_pro', 'K_pro_aer', 'Y_pro_aer', 'Botheju 2010 Eq. 1'), _aerobic_vfa('aerobic_uptake_acetate', 84, 'S_ac', 'K_ac_aer', 'Y_ac_aer', 'Botheju 2010 Eq. 1'))
 S0_REREDUCTION = MicroaerationProcessDefinition('S0_rereduction', 85, multiply(_s('k_S0_red'), _s('S_S0'), monod(_s('S_ac'), _s('K_S0red_donor'))), 'S_S0', {'S_S0': _st(x=-1.0)['x'], 'S_IS': _st(x=1.0)['x'], 'S_ac': multiply(-1.0, _s('COD_per_kmol_S0_reduced'), power(_s('MW_S'), -1.0))}, None, equations=f'k_S0_red S_S0 Monod(S_ac); k_S0_red = 0 in the base case ({S0_REREDUCTION_RULING})')
 MICROAERATION_PROCESSES: tuple[MicroaerationProcessDefinition, ...] = (HEADSPACE_H2S_OXIDATION, O2_TRANSFER, *_L1, S0_REREDUCTION)
-O2_INHIBITION = noncompetitive_inhibition(_s(S_O2), _s('KI_O2'))
+O2_INHIBITION = named_factor('I_O2', noncompetitive_inhibition(_s(S_O2), _s('KI_O2')))
 O2_INHIBITED_PROCESS_INDICES = (3, 4, 5, 6, 7, 8, 9, 10, 25, 27, 29, 31, 32)
 
 @dataclass(frozen=True)

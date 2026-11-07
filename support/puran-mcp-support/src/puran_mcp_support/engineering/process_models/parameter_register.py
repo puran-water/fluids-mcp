@@ -7,7 +7,7 @@ def _v(value: float, unit: str='1', note: str='') -> ParameterValue:
 MADM1_KINETICS_SUBJECT = 'mADM1 core kinetics (shared biokinetic kernel)'
 
 def madm1_core_kinetics_house_default() -> list[ParameterSet]:
-    "The ADM1 core's kinetic and stoichiometric parameters -> ``house_default``, house library."
+    """The ADM1 core's kinetic and stoichiometric parameters -> ``house_default``, house library."""
     from puran_mcp_support.engineering._sibling_libs import ensure_sibling_importable
     ensure_sibling_importable('puran_mcp_support.schema')
     from puran_mcp_support.schema.madm1_biokinetics import MADM1_BIOKINETICS_KERNEL as kernel

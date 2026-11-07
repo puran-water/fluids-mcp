@@ -105,4 +105,43 @@ def growth_rate(k_g: Expression | Scalar, area: Expression | Scalar, saturation_
 def dissolution_rate(k_d: Expression | Scalar, area: Expression | Scalar, saturation_ratio: Expression | Scalar, exponent: Expression | Scalar, epsilon: Expression | Scalar) -> Expression:
     driving = smooth_positive(add(1.0, multiply(-1.0, saturation_ratio)), epsilon)
     return multiply(-1.0, k_d, area, power(driving, exponent))
-__all__ = ['Binary', 'Constant', 'Expression', 'Nary', 'SaturationRatio', 'Symbol', 'Unary', 'add', 'as_expression', 'dissolution_rate', 'exp', 'growth_rate', 'log', 'monod', 'multiply', 'noncompetitive_inhibition', 'nucleation_rate', 'power', 'smooth_minimum', 'smooth_positive']
+FACTOR_NAMES: dict[str, str] = {}
+
+def named_factor(name: str, expression: Expression) -> Expression:
+    """``expression`` unchanged, its name recorded in `FACTOR_NAMES`; one factor never carries two names."""
+    key = expression.sha256
+    if FACTOR_NAMES.setdefault(key, name) != name:
+        raise ValueError(f'factor {name!r} is already named {FACTOR_NAMES[key]!r}')
+    return expression
+
+def _symbol_names(expression: Expression) -> list[str]:
+    found: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get('op') == 'symbol':
+                found.add(node['name'])
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for value in node:
+                walk(value)
+    walk(expression.to_dict())
+    return sorted(found)
+
+def product_factors(expression: Expression) -> tuple[tuple[str, Expression], ...]:
+    """``expression`` as the factors of its product, in order, each ``(name, factor)``: a named factor
+    (`named_factor`) as itself; a nested ``multiply`` flattened; any other factor named by its operator and the symbols
+    it reads (``monod(K_so4_hSRB, S_SO4)``), never a guessed name. The product of the factors is ``expression``."""
+    name = FACTOR_NAMES.get(expression.sha256)
+    if name is not None:
+        return ((name, expression),)
+    if isinstance(expression, Nary) and expression.op == 'multiply':
+        return tuple((factor for value in expression.values for factor in product_factors(value)))
+    if isinstance(expression, Symbol):
+        return ((expression.name, expression),)
+    if isinstance(expression, Constant):
+        return ((f'constant {expression.value:g}', expression),)
+    op = getattr(expression, 'op', None) or 'saturation_ratio'
+    return ((f'{op}({', '.join(_symbol_names(expression))})', expression),)
+__all__ = ['Binary', 'Constant', 'Expression', 'FACTOR_NAMES', 'Nary', 'SaturationRatio', 'Symbol', 'Unary', 'add', 'as_expression', 'dissolution_rate', 'exp', 'growth_rate', 'log', 'monod', 'multiply', 'named_factor', 'noncompetitive_inhibition', 'nucleation_rate', 'power', 'product_factors', 'smooth_minimum', 'smooth_positive']

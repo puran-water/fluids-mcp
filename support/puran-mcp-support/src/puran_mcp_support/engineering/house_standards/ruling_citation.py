@@ -21,7 +21,7 @@ def owner_ruling_citation(ruling_id: str, date: str) -> str:
     """The face citation of an owner ruling: ``owner ruling <id>, <date>`` (`FACE_CITES_RULING_BY_ID_RULING_ID`). The id
     must be a recorded ruling id and the date the ruling's own (its id ends in it, and it is a calendar date); nothing
     else goes on the face."""
-    if re.fullmatch(r'PUBLIC-RULE-[0-9a-f]{12}', str(ruling_id)):
+    if re.fullmatch('PUBLIC-RULE-[0-9a-f]{12}', str(ruling_id)):
         dt.date.fromisoformat(str(date))
         return f'public model reference {ruling_id}, {date}; no approval authority'
     if not re.fullmatch('20\\d\\d-\\d\\d-\\d\\d', str(date)) or ruling_date(ruling_id) != str(date):

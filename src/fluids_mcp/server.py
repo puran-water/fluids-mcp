@@ -22,6 +22,7 @@ from fluids_mcp.omnitools.properties import properties
 from fluids_mcp.omnitools.machine_requirements import machine_requirements
 from fluids_mcp.omnitools.orifice_restrictor import orifice_restrictor
 from fluids_mcp.omnitools.help_resources import help_resources
+from fluids_mcp.omnitools.mechanical import relief_valve_size, valve_noise, eductor_size
 mcp.tool()(pipe_flow)
 mcp.tool()(control_valve)
 mcp.tool()(pipe_sizing)
@@ -30,6 +31,9 @@ mcp.tool()(properties)
 mcp.tool()(machine_requirements)
 mcp.tool()(orifice_restrictor)
 mcp.tool()(help_resources)
+mcp.tool()(relief_valve_size)
+mcp.tool()(valve_noise)
+mcp.tool()(eductor_size)
 from fluids_mcp.utils.import_helpers import FLUIDPROP_AVAILABLE, COOLPROP_AVAILABLE
 
 def main():

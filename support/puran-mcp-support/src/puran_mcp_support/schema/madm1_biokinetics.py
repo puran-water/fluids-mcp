@@ -1,11 +1,42 @@
-'Shared mADM1 biokinetic kernel: ONE definition of the ADM1 core\'s kinetics, stoichiometry and parameter set.\n\n* **QSDsan** (``qsdsan-engine-mcp/models/madm1.py``): ``ModifiedADM1`` takes its default arguments from\n  :data:`MADM1_BIOKINETICS_KERNEL` (:func:`kernel_parameter_values`). Its ``rhos_madm1`` stays the twin\'s\n  vectorised numpy implementation; a parity test proves it equals this kernel\'s rate expressions, evaluated by\n  ``process_chemistry_reference.madm1_biokinetics``, at common states.\n* **WaterTAP** (``watertap-engine-mcp/chemistry/modified_adm1_kernel.py``): the house kernel reaction block compiles\n  these rate expressions into Pyomo (``chemistry.pyomo_compiler``), takes its rate-reaction stoichiometry from\n  :func:`process_chemistry_reference.madm1_biokinetics.stoichiometric_matrix` and its parameter values from the\n  digester parameter set read through the process-model custody API.\n\nScope. The kernel is the ADM1 CORE that both engines carry state for: hydrolysis, the eight uptakes, the seven\ndecays, PHA storage and the three lyses (the twin\'s process indices 0-24, the WaterTAP reactions R1-R25). The twin\'s\nsulfate-reducing, iron/HFO and mineral subsystems are NOT here: their constants already live in the shared Fe-S-P and\nmineral-extension kernels (:mod:`.vertical_slices`, :mod:`.mineral_extension`), and the steady WaterTAP digester has\nno state for them. A rate law here that reads free H2S therefore reads it as a SYMBOL: the twin supplies its\nsulfide, a model without sulfide supplies 0 and the factor is exactly 1.\n\nConventions:\n\n* state symbols are the mADM1 component ids, in kg (measured basis) per m3: kg COD for organics and biomass, kg C /\n  N / P for S_IC / S_IN / S_IP, kg P for X_PP, kg K / Mg for S_K / S_Mg;\n* rates are in kg (of the process\'s reference component) per m3 per DAY;\n* the speciation the rates read is supplied as derived symbols (:data:`DERIVED_SYMBOLS`) by each engine\'s own\n  acid-base solve: the hydrogen-ion activity, free NH3, free molecular H2S and sodium;\n* the conserved inorganic carriers (S_IC, S_IN, S_IP) close each process\'s C, N and P balance from the component\n  contents (:data:`MADM1_CORE_CONTENTS`), exactly as QSDsan\'s ``conserved_for=(\'C\', \'N\', \'P\')`` does.\n\nTrace-element quarantine (fix/madm1-trace-quarantine, 2026-07-21): the former KS_Co / KS_Ni / KS_Se "defaults" were\nliterature dose magnitudes shipped as Monod half-saturations. They have no place in this parameter set, and\n:func:`validate_madm1_biokinetic_kernel` refuses any parameter whose name a quarantine entry names\n(:data:`QUARANTINED_PARAMETER_NAMES`).'
+"""Shared mADM1 biokinetic kernel: ONE definition of the ADM1 core's kinetics, stoichiometry and parameter set.
+
+* **QSDsan** (``qsdsan-engine-mcp/models/madm1.py``): ``ModifiedADM1`` takes its default arguments from
+  :data:`MADM1_BIOKINETICS_KERNEL` (:func:`kernel_parameter_values`). Its ``rhos_madm1`` stays the twin's
+  vectorised numpy implementation; a parity test proves it equals this kernel's rate expressions, evaluated by
+  ``process_chemistry_reference.madm1_biokinetics``, at common states.
+* **WaterTAP** (``watertap-engine-mcp/chemistry/modified_adm1_kernel.py``): the house kernel reaction block compiles
+  these rate expressions into Pyomo (``chemistry.pyomo_compiler``), takes its rate-reaction stoichiometry from
+  :func:`process_chemistry_reference.madm1_biokinetics.stoichiometric_matrix` and its parameter values from the
+  digester parameter set read through the process-model custody API.
+
+Scope. The kernel is the ADM1 CORE that both engines carry state for: hydrolysis, the eight uptakes, the seven
+decays, PHA storage and the three lyses (the twin's process indices 0-24, the WaterTAP reactions R1-R25). The twin's
+sulfate-reducing, iron/HFO and mineral subsystems are NOT here: their constants already live in the shared Fe-S-P and
+mineral-extension kernels (:mod:`.vertical_slices`, :mod:`.mineral_extension`), and the steady WaterTAP digester has
+no state for them. A rate law here that reads free H2S therefore reads it as a SYMBOL: the twin supplies its
+sulfide, a model without sulfide supplies 0 and the factor is exactly 1.
+
+Conventions:
+
+* state symbols are the mADM1 component ids, in kg (measured basis) per m3: kg COD for organics and biomass, kg C /
+  N / P for S_IC / S_IN / S_IP, kg P for X_PP, kg K / Mg for S_K / S_Mg;
+* rates are in kg (of the process's reference component) per m3 per DAY;
+* the speciation the rates read is supplied as derived symbols (:data:`DERIVED_SYMBOLS`) by each engine's own
+  acid-base solve: the hydrogen-ion activity, free NH3, free molecular H2S and sodium;
+* the conserved inorganic carriers (S_IC, S_IN, S_IP) close each process's C, N and P balance from the component
+  contents (:data:`MADM1_CORE_CONTENTS`), exactly as QSDsan's ``conserved_for=('C', 'N', 'P')`` does.
+
+Trace-element quarantine (fix/madm1-trace-quarantine, 2026-07-21): the former KS_Co / KS_Ni / KS_Se "defaults" were
+literature dose magnitudes shipped as Monod half-saturations. They have no place in this parameter set, and
+:func:`validate_madm1_biokinetic_kernel` refuses any parameter whose name a quarantine entry names
+(:data:`QUARANTINED_PARAMETER_NAMES`)."""
 from __future__ import annotations
 import hashlib
 import json
 import math
 from dataclasses import dataclass, field, replace
 from typing import Mapping, Optional
-from .expression import Expression, Symbol, add, monod, multiply, noncompetitive_inhibition, power
+from .expression import Expression, Symbol, add, monod, multiply, named_factor, noncompetitive_inhibition, power
 SCHEMA_VERSION = '1'
 TWIN_SOURCE = 'Literature-based modified ADM1 kernel (QSDsan lineage); kinetic parameters are not site fits.'
 ADM1_SOURCE = 'Batstone et al. 2002, IWA STR No. 13 (ADM1) ' + '; ' + TWIN_SOURCE
@@ -102,23 +133,23 @@ def _hill_ph(window: str) -> Expression:
     upper, lower = (_s(f'pH_UL_{window}'), _s(f'pH_LL_{window}'))
     half_point = power(10.0, multiply(0.5, add(upper, lower)))
     exponent = multiply(3.0, power(add(upper, multiply(-1.0, lower)), -1.0))
-    return noncompetitive_inhibition(power(multiply(_s('H_ion'), half_point), exponent), 1.0)
+    return named_factor(f'I_pH_{window}', noncompetitive_inhibition(power(multiply(_s('H_ion'), half_point), exponent), 1.0))
 
 def _nutrients() -> Expression:
-    return multiply(monod(_s('S_IN'), multiply(_s('KS_IN'), _s('MW_N'))), monod(_s('S_IP'), multiply(_s('KS_IP'), _s('MW_P'))))
+    return multiply(named_factor('I_IN_lim', monod(_s('S_IN'), multiply(_s('KS_IN'), _s('MW_N')))), named_factor('I_IP_lim', monod(_s('S_IP'), multiply(_s('KS_IP'), _s('MW_P')))))
 
 def _h2(name: str) -> Expression:
-    return noncompetitive_inhibition(_s('S_h2'), _s(name))
+    return named_factor(f'I_{name.removeprefix('KI_')}', noncompetitive_inhibition(_s('S_h2'), _s(name)))
 
 def _h2s(name: str) -> Expression:
-    return noncompetitive_inhibition(_s('H2S_free_kg_S_m3'), _s(name))
+    return named_factor(f'I_{name.removeprefix('KI_')}', noncompetitive_inhibition(_s('H2S_free_kg_S_m3'), _s(name)))
 
 def _nh3() -> Expression:
     ratio = multiply(_s('NH3_M'), power(_s('KI_nh3'), -1.0))
-    return noncompetitive_inhibition(power(ratio, _s('n_nh3')), 1.0)
+    return named_factor('I_nh3', noncompetitive_inhibition(power(ratio, _s('n_nh3')), 1.0))
 
 def _na() -> Expression:
-    return noncompetitive_inhibition(_s('Na_M'), _s('KI_Na'))
+    return named_factor('I_Na', noncompetitive_inhibition(_s('Na_M'), _s('KI_Na')))
 
 def _uptake(rate: str, biomass: str, substrate: str, half: str, *competition: Expression) -> Expression:
     """The uninhibited uptake: k X Monod(S) [x substrate-competition share]."""

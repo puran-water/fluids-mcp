@@ -11,6 +11,7 @@ DEFAULT_ADP_C = 35.0
 SUPERHEAT_WARN_C = 10.0
 DEFAULT_DRY_COMPOSITION: Dict[str, float] = {'methane': 0.6, 'carbon dioxide': 0.4}
 _CAS = {'methane': '74-82-8', 'carbon dioxide': '124-38-9', 'water': '7732-18-5', 'nitrogen': '7727-37-9', 'oxygen': '7782-44-7', 'hydrogen sulfide': '7783-06-4', 'hydrogen': '1333-74-0'}
+_TRC_GAS_COEFFS: Dict[str, tuple] = {'74-82-8': (4.0, 22350000.0, 2018.0, 32.767, -31.098, 1346090000.0, 1229.0, 473.0), '124-38-9': (3.5, 1447000.0, 1029.0, 17.13, -21.542, 479500000.0, 1185.0, 57.0), '7732-18-5': (4.0, 870000.0, 1646.0, 3.111, 1.728, -54010000.0, 559.0, 304.0), '7727-37-9': (3.5, 7615000.0, 3136.0, 2.986, -2.963, 165120000.0, 1784.0, 484.0), '7782-44-7': (3.5, 312000.0, 1442.0, 3.594, -1.895, 38180000.0, 559.0, 267.0), '7783-06-4': (4.0, 1090000.0, 1553.0, 1.845, 4.965, -36440000.0, 381.0, 203.0), '1333-74-0': (4.7, 2311000.0, 1150.0, -10.157, 11.235, -1640000.0, 39.0, 41.0)}
 _WATER_HVAP_TB_J_MOL = 40650.0
 _WATER_TB_K = 373.15
 _WATER_TC_K = 647.096
@@ -110,14 +111,8 @@ def _trc_coeffs(species: str):
     cas = _CAS.get(species.strip().lower())
     if cas is None:
         return None
-    try:
-        from chemicals.heat_capacity import TRC_gas_data
-        if cas not in TRC_gas_data.index:
-            return None
-        row = TRC_gas_data.loc[cas]
-        return [float(row[f'a{i}']) for i in range(8)]
-    except Exception:
-        return None
+    coeffs = _TRC_GAS_COEFFS.get(cas)
+    return list(coeffs) if coeffs is not None else None
 
 def _molar_enthalpy_drop(species: str, T_hot_C: float, T_cold_C: float) -> Optional[float]:
     """Ideal-gas enthalpy released cooling 1 mol from T_hot to T_cold [J/mol]."""
